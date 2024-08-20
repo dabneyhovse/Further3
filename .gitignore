@@ -1,0 +1,13 @@
+sensitive/*
+
+.venv
+.pytype
+
+store/*
+downloads/*
+
+*.py[cod]
+__pycache__
+*$py.class
+
+.DS_Store
