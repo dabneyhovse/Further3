@@ -18,6 +18,8 @@ from pytubefix import Search, YouTube, Playlist
 
 from util import count_iterable
 
+import settings
+
 BOT_TOKEN_FILE = "sensitive/bot_token.txt"
 
 bot_config = BotConfig(
@@ -422,5 +424,4 @@ async def sys_volume(context: UpdateHandlerContext):
         reply_to_message_id=query_message_id)
 
 
-if __name__ == '__main__':
-    bot_config.build()
+bot_config.build()

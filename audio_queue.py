@@ -49,18 +49,18 @@ class QueueElement:
 
         await self.audio_queue.application.create_task(self.message_status_setter("Processing", self.index))
 
-        self.audio = await await_process(
-            audio_transform,
-            args=(
-                AudioSegment.from_file(self.path),
-            ),
-            kwargs={
-                "t_scale": self.postprocessing.time_stretch,
-                "f_shift": self.postprocessing.pitch_shift,
-                "percussive_harmonic_balance": self.postprocessing.percussive_harmonic_balance,
-                "echo": self.postprocessing.echo
-            }
-        )
+        # self.audio = await await_process(
+        #     audio_transform,
+        #     args=(
+        #         AudioSegment.from_file(self.path),
+        #     ),
+        #     kwargs={
+        #         "t_scale": self.postprocessing.time_stretch,
+        #         "f_shift": self.postprocessing.pitch_shift,
+        #         "percussive_harmonic_balance": self.postprocessing.percussive_harmonic_balance,
+        #         "echo": self.postprocessing.echo
+        #     }
+        # )
         await self.audio_queue.application.create_task(self.message_status_setter("Queued", self.index))
         self.downloaded_event.set()
 
@@ -78,7 +78,7 @@ class QueueElement:
             self.audio_queue.application.create_task(self.message_status_setter("Playing", self.index))
         return True
 
-    def pause(self, update_message: bool = True) -> bool:
+    async def pause(self, update_message: bool = True) -> bool:
         if self.playback is None:
             return False
         if not self.playback.is_playing():
@@ -131,6 +131,119 @@ class QueueElement:
             self.audio_queue.application.create_task(callback())
 
 
+# class QueueElement:
+#     def __init__(self, audio_queue: "AudioQueue", video: YouTube, resource: ResourceHandler.Resource,
+#                  message_status_setter: Callable[[str, int | None], Coroutine[Any, Any, None]],
+#                  index: int, postprocessing: "AudioQueue.PostProcessing"):
+#         self.audio_queue = audio_queue
+#         self.video: YouTube = video
+#         self.resource: ResourceHandler.Resource = resource
+#         self.playback: PlayObject | None = None
+#         self.play_time = 0
+#         self.start_time: float | None = None
+#         self.timer_handle: asyncio.TimerHandle | None = None
+#         self.message_status_setter: Callable[
+#             [str, int | None], Coroutine[Any, Any, None]] = message_status_setter
+#         self.index: int = index
+#         self.postprocessing: AudioQueue.PostProcessing = postprocessing
+#         self.audio: AudioSegment | None = None
+#         self.path: str | None = None
+#         self.downloaded_event: asyncio.Event = asyncio.Event()
+#
+#     @staticmethod
+#     def download_audio(stream: Stream, resource_path: str) -> str:
+#         return stream.download(mp3=True, output_path=resource_path)
+#
+#     async def download_and_process_audio(self) -> None:
+#         await self.audio_queue.application.create_task(self.message_status_setter("Downloading", self.index))
+#
+#         stream: Stream = self.video.streams.get_audio_only()
+#         self.path = await await_process(self.download_audio, args=(stream, self.resource.path))
+#
+#         await self.audio_queue.application.create_task(self.message_status_setter("Processing", self.index))
+#
+#         self.audio = await await_process(
+#             audio_transform,
+#             args=(
+#                 AudioSegment.from_file(self.path),
+#             ),
+#             kwargs={
+#                 "t_scale": self.postprocessing.time_stretch,
+#                 "f_shift": self.postprocessing.pitch_shift,
+#                 "percussive_harmonic_balance": self.postprocessing.percussive_harmonic_balance,
+#                 "echo": self.postprocessing.echo
+#             }
+#         )
+#         await self.audio_queue.application.create_task(self.message_status_setter("Queued", self.index))
+#         self.downloaded_event.set()
+#
+#     def play(self, callback: Callable[[], Coroutine[Any, Any, None]], update_message: bool = True) -> bool:
+#         if self.playback is not None:
+#             return False
+#         sliced_audio: AudioSegment = self.audio[self.play_time * 1000:] * (self.audio_queue.digital_volume / 100)
+#         self.playback = sliced_audio.play()
+#         self.start_time = time()
+#
+#         event_loop = asyncio.get_running_loop()
+#         self.timer_handle = event_loop.call_later(self.audio.duration_seconds - self.play_time, self.playback_waiter,
+#                                                   callback)
+#         if update_message:
+#             self.audio_queue.application.create_task(self.message_status_setter("Playing", self.index))
+#         return True
+#
+#     async def pause(self, update_message: bool = True) -> bool:
+#         if self.playback is None:
+#             return False
+#         if not self.playback.is_playing():
+#             self.playback = None
+#             return False
+#         if self.timer_handle is None:
+#             return False
+#         self.timer_handle.cancel()
+#         stop_time = time()
+#         self.playback.stop()
+#         self.play_time += stop_time - self.start_time
+#         self.playback = None
+#         if update_message:
+#             self.audio_queue.application.create_task(self.message_status_setter("Paused", self.index))
+#         return True
+#
+#     def stop(self, message: str) -> bool:
+#         out = not self.freed
+#         if self.timer_handle is not None:
+#             self.timer_handle.cancel()
+#             self.timer_handle = None
+#         if self.playback is not None:
+#             self.playback.stop()
+#             self.playback = None
+#         self.audio_queue.application.create_task(self.message_status_setter(message, None))
+#         if out:
+#             self.free()
+#         return out
+#
+#     def free(self):
+#         self.playback = None
+#         self.resource.close()
+#
+#     @property
+#     def active(self) -> bool:
+#         return self.playback is not None and self.playback.is_playing()
+#
+#     @property
+#     def freed(self) -> bool:
+#         return not self.resource.is_open
+#
+#     def playback_waiter(self, callback: Callable[[], Coroutine[Any, Any, None]]):
+#         if self.playback is not None and self.playback.is_playing():
+#             event_loop = asyncio.get_running_loop()
+#             event_loop.call_later(0.25, self.playback_waiter,
+#                                   callback)
+#         else:
+#             self.timer_handle = None
+#             self.stop("Played")
+#             self.audio_queue.application.create_task(callback())
+
+
 class AudioQueue:
     class State(Enum):
         PAUSED = 0
@@ -145,33 +258,6 @@ class AudioQueue:
                     return "Playing"
                 case AudioQueue.State.PREPROCESSING:
                     return "Preprocessing"
-
-    @dataclass
-    class PostProcessing:
-        pitch_shift: float = 0
-        time_stretch: float = 1
-        percussive_harmonic_balance: float = 0
-        echo: tuple[float, float, float] = (0, 0, 0)
-
-        def __bool__(self) -> bool:
-            return self.pitch_shift != 0 or self.time_stretch != 1 or self.percussive_harmonic_balance != 0
-
-        def __str__(self) -> str:
-            out: str = "In"
-            if self.percussive_harmonic_balance != 0:
-                percussion = min(1.0, 1.0 + self.percussive_harmonic_balance) / (
-                        2 - abs(self.percussive_harmonic_balance)) * 100
-                harmony = min(1.0, 1.0 - self.percussive_harmonic_balance) / (
-                        2 - abs(self.percussive_harmonic_balance)) * 100
-                out += f" \u2192 Percussion : Harmony = {percussion:.2f}% : {harmony:.2f}%"
-            if self.pitch_shift != 0:
-                out += f" \u2192 Pitch-Shift = {self.pitch_shift:.2f}"
-            if self.time_stretch != 1:
-                out += f" \u2192 Time-Stretch = {self.time_stretch:.2f}"
-            if all(self.echo):
-                out += f" \u2192 Echo (power, distance, cos) = {self.echo:.2f}"
-            out += " \u2192 Out"
-            return out
 
     def __init__(self, bot_config: BotConfig, application: Application, volume: float):
         self.queue: list[QueueElement] = []
@@ -198,9 +284,9 @@ class AudioQueue:
         return self.queue[self.index - 1]
 
     def add(
-            self, stream: Stream, resource: ResourceHandler.Resource,
-            message_status_setter: Callable[[str, int | None], Coroutine[Any, Any, None]],
-            postprocessing: "AudioQueue.PostProcessing"
+        self, stream: Stream, resource: ResourceHandler.Resource,
+        message_status_setter: Callable[[str, int | None], Coroutine[Any, Any, None]],
+        postprocessing: "AudioQueue.PostProcessing"
     ) -> tuple[int, QueueElement]:
         out = QueueElement(self, stream, resource, message_status_setter, len(self.queue), postprocessing)
         self.queue.append(out)
