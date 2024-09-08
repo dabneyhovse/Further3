@@ -1,381 +1,193 @@
-import asyncio
-from collections.abc import Callable, Coroutine
+from asyncio import sleep, get_event_loop, Future
+from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
 from enum import Enum
-from time import time
-from typing import Any
+from os import PathLike
+from pathlib import Path
 
-from applescript import AppleScript, AEType
-from pytubefix import Stream, YouTube
-from simpleaudio import PlayObject
-from telegram.ext import Application
+from vlc import Instance, MediaPlayer, Media
+from vlc import State as VLCState
 
 from async_multiprocessing import await_process
-from audio_processing import audio_transform
-from bot_config import BotConfig
+from async_queue import AsyncQueue
+from audio_processing import AudioProcessingSettings
+from pytubefix import YouTube, Stream
 from resource_handler import ResourceHandler
+from settings import Settings
 
-from audio import AudioSegment
 
-
-class QueueElement:
-    def __init__(self, audio_queue: "AudioQueue", video: YouTube, resource: ResourceHandler.Resource,
-                 message_status_setter: Callable[[str, int | None], Coroutine[Any, Any, None]],
-                 index: int, postprocessing: "AudioQueue.PostProcessing"):
-        self.audio_queue = audio_queue
-        self.video: YouTube = video
-        self.resource: ResourceHandler.Resource = resource
-        self.playback: PlayObject | None = None
-        self.play_time = 0
-        self.start_time: float | None = None
-        self.timer_handle: asyncio.TimerHandle | None = None
-        self.message_status_setter: Callable[
-            [str, int | None], Coroutine[Any, Any, None]] = message_status_setter
-        self.index: int = index
-        self.postprocessing: AudioQueue.PostProcessing = postprocessing
-        self.audio: AudioSegment | None = None
-        self.path: str | None = None
-        self.downloaded_event: asyncio.Event = asyncio.Event()
-
-    @staticmethod
-    def download_audio(stream: Stream, resource_path: str) -> str:
-        return stream.download(mp3=True, output_path=resource_path)
-
-    async def download_and_process_audio(self) -> None:
-        await self.audio_queue.application.create_task(self.message_status_setter("Downloading", self.index))
-
-        stream: Stream = self.video.streams.get_audio_only()
-        self.path = await await_process(self.download_audio, args=(stream, self.resource.path))
-
-        await self.audio_queue.application.create_task(self.message_status_setter("Processing", self.index))
-
-        # self.audio = await await_process(
-        #     audio_transform,
-        #     args=(
-        #         AudioSegment.from_file(self.path),
-        #     ),
-        #     kwargs={
-        #         "t_scale": self.postprocessing.time_stretch,
-        #         "f_shift": self.postprocessing.pitch_shift,
-        #         "percussive_harmonic_balance": self.postprocessing.percussive_harmonic_balance,
-        #         "echo": self.postprocessing.echo
-        #     }
-        # )
-        await self.audio_queue.application.create_task(self.message_status_setter("Queued", self.index))
-        self.downloaded_event.set()
-
-    def play(self, callback: Callable[[], Coroutine[Any, Any, None]], update_message: bool = True) -> bool:
-        if self.playback is not None:
-            return False
-        sliced_audio: AudioSegment = self.audio[self.play_time * 1000:] * (self.audio_queue.digital_volume / 100)
-        self.playback = sliced_audio.play()
-        self.start_time = time()
-
-        event_loop = asyncio.get_running_loop()
-        self.timer_handle = event_loop.call_later(self.audio.duration_seconds - self.play_time, self.playback_waiter,
-                                                  callback)
-        if update_message:
-            self.audio_queue.application.create_task(self.message_status_setter("Playing", self.index))
-        return True
-
-    async def pause(self, update_message: bool = True) -> bool:
-        if self.playback is None:
-            return False
-        if not self.playback.is_playing():
-            self.playback = None
-            return False
-        if self.timer_handle is None:
-            return False
-        self.timer_handle.cancel()
-        stop_time = time()
-        self.playback.stop()
-        self.play_time += stop_time - self.start_time
-        self.playback = None
-        if update_message:
-            self.audio_queue.application.create_task(self.message_status_setter("Paused", self.index))
-        return True
-
-    def stop(self, message: str) -> bool:
-        out = not self.freed
-        if self.timer_handle is not None:
-            self.timer_handle.cancel()
-            self.timer_handle = None
-        if self.playback is not None:
-            self.playback.stop()
-            self.playback = None
-        self.audio_queue.application.create_task(self.message_status_setter(message, None))
-        if out:
-            self.free()
-        return out
-
-    def free(self):
-        self.playback = None
-        self.resource.close()
-
-    @property
-    def active(self) -> bool:
-        return self.playback is not None and self.playback.is_playing()
+@dataclass
+class AudioQueueElement:
+    id: int
+    resource: ResourceHandler.Resource
+    video: YouTube
+    processing: AudioProcessingSettings
+    set_message: Callable[[str, int], Coroutine[None, None, None]]
+    path: Future[PathLike]
+    active: bool = False
+    skipped: bool = False
 
     @property
     def freed(self) -> bool:
         return not self.resource.is_open
 
-    def playback_waiter(self, callback: Callable[[], Coroutine[Any, Any, None]]):
-        if self.playback is not None and self.playback.is_playing():
-            event_loop = asyncio.get_running_loop()
-            event_loop.call_later(0.25, self.playback_waiter,
-                                  callback)
-        else:
-            self.timer_handle = None
-            self.stop("Played")
-            self.audio_queue.application.create_task(callback())
+    @staticmethod
+    def _download_audio(stream: Stream, resource_path: str) -> Path:
+        out = Path(stream.download(mp3=True, output_path=resource_path))
+        print("Downloaded")
+        return out
+
+    async def download(self):
+        await self.set_message("Downloading", self.id)
+        stream: Stream = self.video.streams.get_audio_only()
+        self.path.set_result(await await_process(self._download_audio, args=(stream, self.resource.path)))
+        print("Download process await complete")
+        await self.set_message("Processing", self.id)
+        # TODO: Process audio
+        await self.set_message("Queued", self.id)
+        print("Download function complete")
 
 
-# class QueueElement:
-#     def __init__(self, audio_queue: "AudioQueue", video: YouTube, resource: ResourceHandler.Resource,
-#                  message_status_setter: Callable[[str, int | None], Coroutine[Any, Any, None]],
-#                  index: int, postprocessing: "AudioQueue.PostProcessing"):
-#         self.audio_queue = audio_queue
-#         self.video: YouTube = video
-#         self.resource: ResourceHandler.Resource = resource
-#         self.playback: PlayObject | None = None
-#         self.play_time = 0
-#         self.start_time: float | None = None
-#         self.timer_handle: asyncio.TimerHandle | None = None
-#         self.message_status_setter: Callable[
-#             [str, int | None], Coroutine[Any, Any, None]] = message_status_setter
-#         self.index: int = index
-#         self.postprocessing: AudioQueue.PostProcessing = postprocessing
-#         self.audio: AudioSegment | None = None
-#         self.path: str | None = None
-#         self.downloaded_event: asyncio.Event = asyncio.Event()
-#
-#     @staticmethod
-#     def download_audio(stream: Stream, resource_path: str) -> str:
-#         return stream.download(mp3=True, output_path=resource_path)
-#
-#     async def download_and_process_audio(self) -> None:
-#         await self.audio_queue.application.create_task(self.message_status_setter("Downloading", self.index))
-#
-#         stream: Stream = self.video.streams.get_audio_only()
-#         self.path = await await_process(self.download_audio, args=(stream, self.resource.path))
-#
-#         await self.audio_queue.application.create_task(self.message_status_setter("Processing", self.index))
-#
-#         self.audio = await await_process(
-#             audio_transform,
-#             args=(
-#                 AudioSegment.from_file(self.path),
-#             ),
-#             kwargs={
-#                 "t_scale": self.postprocessing.time_stretch,
-#                 "f_shift": self.postprocessing.pitch_shift,
-#                 "percussive_harmonic_balance": self.postprocessing.percussive_harmonic_balance,
-#                 "echo": self.postprocessing.echo
-#             }
-#         )
-#         await self.audio_queue.application.create_task(self.message_status_setter("Queued", self.index))
-#         self.downloaded_event.set()
-#
-#     def play(self, callback: Callable[[], Coroutine[Any, Any, None]], update_message: bool = True) -> bool:
-#         if self.playback is not None:
-#             return False
-#         sliced_audio: AudioSegment = self.audio[self.play_time * 1000:] * (self.audio_queue.digital_volume / 100)
-#         self.playback = sliced_audio.play()
-#         self.start_time = time()
-#
-#         event_loop = asyncio.get_running_loop()
-#         self.timer_handle = event_loop.call_later(self.audio.duration_seconds - self.play_time, self.playback_waiter,
-#                                                   callback)
-#         if update_message:
-#             self.audio_queue.application.create_task(self.message_status_setter("Playing", self.index))
-#         return True
-#
-#     async def pause(self, update_message: bool = True) -> bool:
-#         if self.playback is None:
-#             return False
-#         if not self.playback.is_playing():
-#             self.playback = None
-#             return False
-#         if self.timer_handle is None:
-#             return False
-#         self.timer_handle.cancel()
-#         stop_time = time()
-#         self.playback.stop()
-#         self.play_time += stop_time - self.start_time
-#         self.playback = None
-#         if update_message:
-#             self.audio_queue.application.create_task(self.message_status_setter("Paused", self.index))
-#         return True
-#
-#     def stop(self, message: str) -> bool:
-#         out = not self.freed
-#         if self.timer_handle is not None:
-#             self.timer_handle.cancel()
-#             self.timer_handle = None
-#         if self.playback is not None:
-#             self.playback.stop()
-#             self.playback = None
-#         self.audio_queue.application.create_task(self.message_status_setter(message, None))
-#         if out:
-#             self.free()
-#         return out
-#
-#     def free(self):
-#         self.playback = None
-#         self.resource.close()
-#
-#     @property
-#     def active(self) -> bool:
-#         return self.playback is not None and self.playback.is_playing()
-#
-#     @property
-#     def freed(self) -> bool:
-#         return not self.resource.is_open
-#
-#     def playback_waiter(self, callback: Callable[[], Coroutine[Any, Any, None]]):
-#         if self.playback is not None and self.playback.is_playing():
-#             event_loop = asyncio.get_running_loop()
-#             event_loop.call_later(0.25, self.playback_waiter,
-#                                   callback)
-#         else:
-#             self.timer_handle = None
-#             self.stop("Played")
-#             self.audio_queue.application.create_task(callback())
-
-
-class AudioQueue:
+class AudioQueue(Iterable[AudioQueueElement]):
     class State(Enum):
-        PAUSED = 0
-        PLAYING = 1
-        PREPROCESSING = 2
+        LOADING = 0
+        EMPTY = 1
+        PAUSED = 2
+        PLAYING = 3
+        UNKNOWN_ERROR = 4
+        VLC_ERROR = 5
 
         def __str__(self):
             match self:
+                case AudioQueue.State.LOADING:
+                    return "Loading"
+                case AudioQueue.State.EMPTY:
+                    return "Empty"
                 case AudioQueue.State.PAUSED:
                     return "Paused"
                 case AudioQueue.State.PLAYING:
                     return "Playing"
-                case AudioQueue.State.PREPROCESSING:
-                    return "Preprocessing"
+                case AudioQueue.State.UNKNOWN_ERROR:
+                    return "Unknown Error"
+                case AudioQueue.State.VLC_ERROR:
+                    return "VLC Error"
 
-    def __init__(self, bot_config: BotConfig, application: Application, volume: float):
-        self.queue: list[QueueElement] = []
-        self.index: int = 0
-        self.bot_config: BotConfig = bot_config
-        self.digital_volume: float = volume
-        self.resource_handler: ResourceHandler = bot_config.resource_handler
-        self.scheduled = None
-        self.state = AudioQueue.State.PLAYING
-        self.application = application
-        self.set_sys_volume_script = AppleScript(path="apple_script/set_volume.scpt")
-        self.get_sys_volume_script = AppleScript(path="apple_script/get_volume.scpt")
+    queue: AsyncQueue[AudioQueueElement]
+    instance: Instance
+    player: MediaPlayer
+    current: AudioQueueElement | None = None
+    _next_id: int = 0
 
-    @property
-    def max_vol(self) -> float:
-        return 150
+    def __init__(self):
+        self.queue = AsyncQueue()
+        self.instance = Instance()
+        self.player = self.instance.media_player_new()
+        get_event_loop().create_task(self.play_queue())
 
     @property
-    def current(self) -> QueueElement:
-        return self.queue[self.index]
+    def is_playing(self) -> bool:
+        return self.player.is_playing()
 
-    @property
-    def prev(self) -> QueueElement:
-        return self.queue[self.index - 1]
+    async def add(self, element: AudioQueueElement):
+        print("Adding element to queue")
+        await self.queue.append(element)
+        print("Append complete")
+        await element.download()
+        print("Download await received")
 
-    def add(
-        self, stream: Stream, resource: ResourceHandler.Resource,
-        message_status_setter: Callable[[str, int | None], Coroutine[Any, Any, None]],
-        postprocessing: "AudioQueue.PostProcessing"
-    ) -> tuple[int, QueueElement]:
-        out = QueueElement(self, stream, resource, message_status_setter, len(self.queue), postprocessing)
-        self.queue.append(out)
-        download_and_process_awaitable: Coroutine[Any, Any, None] = out.download_and_process_audio()
-        self.application.create_task(download_and_process_awaitable)
-        self.start()
-        return len(self.queue) - 1, out
+    async def play_queue(self) -> None:
+        async with self.queue.async_iter() as async_iterator:
+            async for element in async_iterator:
+                self.current = element
+                print("Waiting for path")
+                path: str = await element.path
+                print("Acquired path")
+                media: Media = self.instance.media_new_path(path)
+                self.player.set_media(media)
 
-    async def play_next(self, update_message: bool = True) -> None:
-        while self.index < len(self.queue) and self.current.freed:
-            self.index += 1
-        if self.index < len(self.queue):
-            if self.current.audio is None:
-                self.state = AudioQueue.State.PREPROCESSING
-                assert self.current.downloaded_event is not None
-                await self.current.downloaded_event.wait()
-            if self.state in [AudioQueue.State.PREPROCESSING, AudioQueue.State.PLAYING]:
-                self.state = AudioQueue.State.PLAYING
-                self.current.play(self.play_next, update_message)
-                self.index += 1
+                self.player.play()
+                element.active = True
 
-    def start(self) -> None:
-        if not (self.index and self.prev.active):
-            self.play_next_if_active()
+                while self.is_playing:  # TODO: Check for skip?
+                    # TODO: Wait for the duration or skip (whichever first)
+                    await sleep(Settings.async_sleep_refresh_rate)
 
-    async def unpause(self, update_message: bool = True) -> bool:
-        if self.state == self.State.PAUSED:
-            self.state = self.State.PLAYING
-            await self.play_next(update_message)
-            return True
+                # TODO: release() media if needed
+                element.active = False
+                element.resource.close()
+                self.current = None
+
+    async def skip_all(self) -> bool:
+        if not self.is_playing and not self.queue:
+            return False
+        for element in self.queue.destructive_iter:
+            element.skipped = True
+        self.player.stop()
+
+    async def pause(self) -> None:
+        self.player.set_pause(True)
+
+    async def resume(self) -> None:
+
+        self.player.set_pause(False)
+
+    async def skip(self) -> bool:
+        if not self.is_playing and not self.queue:
+            return False
+        for element in self.queue.destructive_iter:
+            element.skipped = True
+            element.active = False
+        self.player.stop()
+        return True
+
+    async def set_digital_volume(self, volume: float) -> bool:
+        absolute_volume: float = volume * Settings.hundred_percent_volume_value
+        if 0 <= absolute_volume <= Settings.max_absolute_volume * 100:
+            return self.player.audio_set_volume(round(absolute_volume)) + 1
         else:
             return False
 
-    def pause(self, update_message: bool = True) -> bool:
-        self.state = self.State.PAUSED
-        out = self.index != 0 and self.prev.active and self.prev.pause(update_message=update_message)
-        if out:
-            self.index -= 1
+    async def set_clamped_digital_volume(self, volume: float) -> bool:
+        absolute_volume: float = volume * Settings.hundred_percent_volume_value
+        absolute_volume = min(max(absolute_volume, 0), Settings.max_absolute_volume * 100)
+        return self.player.audio_set_volume(round(absolute_volume)) + 1
+
+    async def get_digital_volume(self) -> float:
+        scaled_volume = self.player.audio_get_volume()
+        return scaled_volume / Settings.hundred_percent_volume_value
+
+    @property
+    def state(self) -> State:
+        print(f"Current state:"
+              f"\n\tself.player.get_state(): {self.player.get_state()}"
+              f"\n\tself.queue: {self.queue}"
+              f"\n\tself.current: {self.current}")
+        match (self.player.get_state(), bool(self.queue), self.current is not None):
+            case (VLCState.Playing, _, True):
+                return AudioQueue.State.PLAYING
+            case (VLCState.Paused, _, True):
+                return AudioQueue.State.PAUSED
+            case (VLCState.Ended | VLCState.Stopped | VLCState.NothingSpecial, False, False):
+                return AudioQueue.State.EMPTY
+            case (VLCState.Error, _, _):
+                return AudioQueue.State.VLC_ERROR
+            case (_, True, False):
+                return AudioQueue.State.LOADING
+            case (VLCState.Ended | VLCState.Stopped | VLCState.NothingSpecial, _, True):
+                return AudioQueue.State.LOADING
+            case (VLCState.Opening | VLCState.Buffering, _, True):
+                return AudioQueue.State.LOADING
+            case _:
+                print(f"Unknown state:"
+                      f"\n\tself.player.get_state(): {self.player.get_state()}"
+                      f"\n\tself.queue: {self.queue}"
+                      f"\n\tself.current: {self.current}")
+                return AudioQueue.State.UNKNOWN_ERROR
+
+    def get_id(self) -> int:
+        out: int = self._next_id
+        self._next_id += 1
         return out
 
-    def play_next_if_active(self) -> None:
-        if self.state == AudioQueue.State.PLAYING:
-            self.application.create_task(self.play_next())
-
-    async def skip(self, username: str) -> bool:
-        if self.state == AudioQueue.State.PLAYING and self.index != 0:
-            closed = self.index != 0 and self.prev.stop("Skipped by " + username)
-            await self.play_next()
-            return closed
-        elif self.state == AudioQueue.State.PAUSED and self.index < len(self.queue):
-            closed = self.current.stop("Skipped by " + username)
-            self.index += 1
-            return closed
-
-    async def skip_specific(self, username: str, index: int) -> None:
-        queue_element = self.queue[index]
-        queue_element.stop("Skipped by " + username)
-        if self.state == AudioQueue.State.PLAYING and self.prev == queue_element:
-            await self.play_next()
-
-    def skip_all(self, username: str) -> None:
-        skip_start_index: int
-        if self.state == AudioQueue.State.PAUSED and self.index < len(self.queue):
-            skip_start_index = self.index
-
-        elif self.state == AudioQueue.State.PLAYING and self.index != 0:
-            skip_start_index = self.index - 1
-        else:
-            return
-        for element in self.queue[skip_start_index:]:
-            element.stop("Skipped by " + username)
-        self.index = len(self.queue)
-
-    def set_sys_volume(self, volume: float) -> float:
-        actual_volume = min(max(volume, 0), 100)
-        self.set_sys_volume_script.run(actual_volume)
-        return actual_volume
-
-    def get_sys_volume(self) -> float:
-        volume_settings = self.get_sys_volume_script.run()
-        return volume_settings[AEType(b"ouvl")]
-
-    async def set_digital_volume(self, volume: float) -> float:
-        actual_volume = min(max(volume, 0), self.max_vol)
-        self.digital_volume = actual_volume
-        if self.state == AudioQueue.State.PLAYING and 0 < self.index and self.prev.active:
-            self.pause(update_message=False)
-            await self.unpause(update_message=False)
-        return actual_volume
-
-    def get_digital_volume(self) -> float:
-        return self.digital_volume
+    def __iter__(self):
+        return iter(self.queue)

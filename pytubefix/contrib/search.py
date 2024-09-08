@@ -249,11 +249,12 @@ class Search:
                     channel.append(Channel(f"https://www.youtube.com/channel/"
                                            f"{video_details['channelRenderer']['channelId']}"))
 
-                # Get shorts results
-                if 'reelShelfRenderer' in video_details:
-                    for items in video_details['reelShelfRenderer']['items']:
-                        shorts.append(YouTube(f"https://www.youtube.com/watch?v="
-                                              f"{items['reelItemRenderer']['videoId']}"))
+                # Get shorts results (Disabled)
+
+                # if 'reelShelfRenderer' in video_details:
+                #     for items in video_details['reelShelfRenderer']['items']:
+                #         shorts.append(YouTube(f"https://www.youtube.com/watch?v="
+                #                               f"{items['reelItemRenderer']['videoId']}"))
 
                 # Get videos results
                 if 'videoRenderer' in video_details:

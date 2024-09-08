@@ -1,4 +1,5 @@
 import datetime
+from asyncio import Future
 from time import time
 from typing import cast
 
@@ -10,15 +11,14 @@ from telegram.constants import ParseMode
 from telegram.ext import filters
 
 import opinions
-from audio_queue import AudioQueue, QueueElement
+from audio_processing import AudioProcessingSettings
+from audio_queue import AudioQueue, AudioQueueElement
 from bot_config import BotConfig, edit_message_text
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
 
 from pytubefix import Search, YouTube, Playlist
 
 from util import count_iterable
-
-import settings
 
 BOT_TOKEN_FILE = "sensitive/bot_token.txt"
 
@@ -32,7 +32,8 @@ bot_config = BotConfig(
 @bot_config.add_post_init_handler
 async def post_init(context: ApplicationHandlerContext):
     context.bot_data.defaults.digital_volume = 30.0
-    context.run_data.queue = AudioQueue(bot_config, context.application, context.bot_data.digital_volume)
+    context.run_data.queue = AudioQueue()
+    await context.run_data.queue.set_clamped_digital_volume(context.bot_data.digital_volume)
 
 
 def format_dict_message(details: dict[str, tuple[str, bool]]) -> str:
@@ -61,7 +62,7 @@ def format_tree_message(details: tree_message) -> str:
             return out
 
 
-def format_add_video_status(video: YouTube, user: User, postprocessing: AudioQueue.PostProcessing | None,
+def format_add_video_status(video: YouTube, user: User, postprocessing: AudioProcessingSettings | None,
                             status: str) -> str:
     return format_tree_message({
         "Queued song": (f"<code>{video.title}</code>", True),
@@ -73,7 +74,7 @@ def format_add_video_status(video: YouTube, user: User, postprocessing: AudioQue
     })
 
 
-def format_add_playlist_video_status(video: YouTube, postprocessing: AudioQueue.PostProcessing | None,
+def format_add_playlist_video_status(video: YouTube, postprocessing: AudioProcessingSettings | None,
                                      status: str) -> str:
     return format_tree_message({
         "Queued song": (f"<code>{video.title}</code>", True),
@@ -84,7 +85,7 @@ def format_add_playlist_video_status(video: YouTube, postprocessing: AudioQueue.
     })
 
 
-def format_add_playlist_status(playlist: Playlist, user: User, postprocessing: AudioQueue.PostProcessing,
+def format_add_playlist_status(playlist: Playlist, user: User, postprocessing: AudioProcessingSettings,
                                status: str) -> str:
     return format_tree_message({
         "Queued playlist": (f"<code>{playlist.title}</code>", True),
@@ -117,25 +118,29 @@ def find_playlist(query_text: str) -> Playlist | None:
 
 
 def format_get_queue(queue: AudioQueue) -> str:
-    songs: list[QueueElement] = [
-        element
-        for element in
-        queue.queue[max(0, queue.index - 1):]
-        if not element.freed]
+    songs: list[AudioQueueElement] = [element for element in queue if not element.freed]
     return format_tree_message(
         [
             {
                 "State": (queue.state, True),
                 "Songs": (len(songs), True),
-                "Remaining play time": (datetime.timedelta(
-                    seconds=round(sum(element.video.length - element.play_time - (
-                        time() - element.start_time if element.active else 0) for element in songs))), True)
+                "Remaining play time": (
+                    datetime.timedelta(
+                        seconds=round(
+                            sum(element.video.length for element in songs) + (
+                                queue.current.video.length - queue.player.get_time() * 1000
+                                if queue.state in [AudioQueue.State.PLAYING, AudioQueue.State.PAUSED] else
+                                0
+                            )
+                        )
+                    ),
+                    True)
             },
             ("Queue", [{
                 "Queued song": (f"<code>{element.video.title}</code>", True),
                 "Author": (f"<code>{element.video.author}</code>", True),
                 "Duration": (str(datetime.timedelta(seconds=element.video.length)), True),
-                "Post-processing": (element.postprocessing, element.postprocessing)
+                "Post-processing": (element.processing, element.processing)
             } for element in songs])
         ]
     )
@@ -164,7 +169,7 @@ async def parse_float(s: str, context: UpdateHandlerContext, query_message_id: i
 
 
 async def parse_query(context: UpdateHandlerContext, query_message_id: int):
-    postprocessing: AudioQueue.PostProcessing = AudioQueue.PostProcessing()
+    postprocessing: AudioProcessingSettings = AudioProcessingSettings()
 
     query_text: str = ""
     arg_text: str = ""
@@ -266,7 +271,7 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int):
 
 
 async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User, query_message_id: int,
-                      postprocessing: AudioQueue.PostProcessing, part_of_playlist: bool = False):
+                      postprocessing: AudioProcessingSettings, part_of_playlist: bool = False):
     message: Message = await context.send_message(
         (format_add_playlist_video_status if part_of_playlist else format_add_video_status)(
             video, user, postprocessing, "Downloading"),
@@ -293,11 +298,20 @@ async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User,
                 raise
 
     await message_edit_status("Adding to queue", None)
-    context.run_data.queue.add(video, download_resource, message_edit_status, postprocessing)
+    id: int = context.run_data.queue.get_id()
+    queue_element: AudioQueueElement = AudioQueueElement(
+        id=id,
+        resource=download_resource,
+        video=video,
+        processing=postprocessing,
+        set_message=message_edit_status,
+        path=Future()
+    )
+    await context.run_data.queue.add(queue_element)
 
 
 async def queue_playlist(context: UpdateHandlerContext, playlist: Playlist, user: User, query_message_id: int,
-                         postprocessing: AudioQueue.PostProcessing):
+                         postprocessing: AudioProcessingSettings):
     message: Message = await context.send_message(
         format_add_playlist_status(playlist, user, postprocessing, "Loading"),
         parse_mode=ParseMode.HTML,
@@ -385,9 +399,15 @@ async def set_volume(context: UpdateHandlerContext):
     except ValueError:
         await query_message.set_reaction(opinions.lol_emoji())
         return
-    context.bot_data.digital_volume = new_volume
-    await context.run_data.queue.set_digital_volume(new_volume)
-    await query_message.set_reaction("👍")
+    if new_volume < 0.0:
+        await query_message.set_reaction(opinions.lol_emoji())
+    else:
+        result = await context.run_data.queue.set_digital_volume(new_volume)
+        if result:
+            await query_message.set_reaction("👍")
+            context.bot_data.digital_volume = new_volume
+        else:
+            await query_message.set_reaction("🙉")
 
 
 @bot_config.add_command_handler(["volume", "vol", "v"], filters=~filters.UpdateType.EDITED_MESSAGE, has_args=False)
@@ -395,7 +415,7 @@ async def get_volume(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
     await context.send_message(
-        f"Current volume: {context.run_data.queue.get_digital_volume()}",
+        f"Current volume: {round(await context.run_data.queue.get_digital_volume())}",
         parse_mode=ParseMode.HTML,
         reply_to_message_id=query_message_id)
 
