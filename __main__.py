@@ -1,23 +1,21 @@
+import asyncio
 import datetime
+import logging
 from asyncio import Future
-from time import time
 from typing import cast
 
-from telegram.error import BadRequest
-
-import pytubefix
 from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram.ext import filters
 
 import opinions
+import pytubefix
 from audio_processing import AudioProcessingSettings
 from audio_queue import AudioQueue, AudioQueueElement
 from bot_config import BotConfig, edit_message_text
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
-
 from pytubefix import Search, YouTube, Playlist
-
 from util import count_iterable
 
 BOT_TOKEN_FILE = "sensitive/bot_token.txt"
@@ -34,6 +32,35 @@ async def post_init(context: ApplicationHandlerContext):
     context.bot_data.defaults.digital_volume = 30.0
     context.run_data.queue = AudioQueue()
     await context.run_data.queue.set_clamped_digital_volume(context.bot_data.digital_volume)
+
+    import code
+    import traceback
+    import signal
+
+    def debug(sig, frame):
+        """Interrupt running process, and provide a python prompt for
+        interactive debugging."""
+        d = {'_frame': frame}  # Allow access to frame object.
+        d.update(frame.f_globals)  # Unless shadowed by global
+        d.update(frame.f_locals)
+
+        i = code.InteractiveConsole(d)
+        message = "Signal received : entering python shell.\nTraceback:\n"
+        message += ''.join(traceback.format_stack(frame))
+        i.interact(message)
+
+    def listen():
+        signal.signal(signal.SIGUSR1, debug)  # Register handler
+
+    import os
+    print(f"Execution pid: {os.getpid()}")
+
+    listen()
+
+    # TODO: Remove when unneeded
+    asyncio.get_running_loop().set_debug(True)
+    logging.basicConfig(level=logging.DEBUG)
+    asyncio.get_running_loop().slow_callback_duration = 0.01
 
 
 def format_dict_message(details: dict[str, tuple[str, bool]]) -> str:
@@ -128,7 +155,7 @@ def format_get_queue(queue: AudioQueue) -> str:
                     datetime.timedelta(
                         seconds=round(
                             sum(element.video.length for element in songs) + (
-                                queue.current.video.length - queue.player.get_time() * 1000
+                                queue.current.video.length - queue.player.get_time() / 1000
                                 if queue.state in [AudioQueue.State.PLAYING, AudioQueue.State.PAUSED] else
                                 0
                             )
@@ -136,18 +163,26 @@ def format_get_queue(queue: AudioQueue) -> str:
                     ),
                     True)
             },
+            ("Current", {
+                "Queued song": (f"<code>{queue.current.video.title}</code>", True),
+                "Author": (f"<code>{queue.current.video.author}</code>", True),
+                "Duration": (str(datetime.timedelta(seconds=queue.current.video.length)), True),
+                "Remaining": queue.current.video.length - queue.player.get_time() / 1000,
+                "Post-processing": (queue.current.processing, queue.current.processing),
+            } if queue.current is not None else "<None>"),
             ("Queue", [{
                 "Queued song": (f"<code>{element.video.title}</code>", True),
                 "Author": (f"<code>{element.video.author}</code>", True),
                 "Duration": (str(datetime.timedelta(seconds=element.video.length)), True),
                 "Post-processing": (element.processing, element.processing)
-            } for element in songs])
+            } for element in songs] if songs else "<Empty>")
         ]
     )
 
 
 @bot_config.add_command_handler(["q", "queue", "queued"], filters=~filters.UpdateType.EDITED_MESSAGE, has_args=False)
 async def get_queue(context: UpdateHandlerContext):
+    print("Starting get_queue")
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
     await context.send_message(
@@ -304,10 +339,11 @@ async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User,
         resource=download_resource,
         video=video,
         processing=postprocessing,
-        set_message=message_edit_status,
+        message_setter=message_edit_status,
         path=Future()
     )
     await context.run_data.queue.add(queue_element)
+    print("Add completed")
 
 
 async def queue_playlist(context: UpdateHandlerContext, playlist: Playlist, user: User, query_message_id: int,
@@ -326,7 +362,7 @@ async def queue_playlist(context: UpdateHandlerContext, playlist: Playlist, user
 
 
 @bot_config.add_command_handler(["q", "queue", "add", "enqueue"], filters=~filters.UpdateType.EDITED_MESSAGE,
-                                has_args=True, blocking=False)
+                                has_args=True)
 async def enqueue(context: UpdateHandlerContext):
     user: User = context.update.effective_user
     query_message_id: int = context.update.message.message_id

@@ -22,7 +22,7 @@ class AudioQueueElement:
     resource: ResourceHandler.Resource
     video: YouTube
     processing: AudioProcessingSettings
-    set_message: Callable[[str, int], Coroutine[None, None, None]]
+    message_setter: Callable[[str, int], Coroutine[None, None, None]]
     path: Future[PathLike]
     active: bool = False
     skipped: bool = False
@@ -37,14 +37,19 @@ class AudioQueueElement:
         print("Downloaded")
         return out
 
+    async def set_message(self, message: str, skippable: bool = True) -> None:
+        await self.message_setter(message, self.id if skippable else None)
+
     async def download(self):
-        await self.set_message("Downloading", self.id)
+        await self.set_message("Downloading")
         stream: Stream = self.video.streams.get_audio_only()
-        self.path.set_result(await await_process(self._download_audio, args=(stream, self.resource.path)))
+        path: PathLike = await await_process(self._download_audio, args=(stream, self.resource.path))
         print("Download process await complete")
-        await self.set_message("Processing", self.id)
+        await self.set_message("Processing")
         # TODO: Process audio
-        await self.set_message("Queued", self.id)
+        await self.set_message("Queued")
+        print("Message setters completed")
+        self.path.set_result(path)
         print("Download function complete")
 
 
@@ -84,10 +89,6 @@ class AudioQueue(Iterable[AudioQueueElement]):
         self.player = self.instance.media_player_new()
         get_event_loop().create_task(self.play_queue())
 
-    @property
-    def is_playing(self) -> bool:
-        return self.player.is_playing()
-
     async def add(self, element: AudioQueueElement):
         print("Adding element to queue")
         await self.queue.append(element)
@@ -98,6 +99,7 @@ class AudioQueue(Iterable[AudioQueueElement]):
     async def play_queue(self) -> None:
         async with self.queue.async_iter() as async_iterator:
             async for element in async_iterator:
+                print("Queue loop start")
                 self.current = element
                 print("Waiting for path")
                 path: str = await element.path
@@ -105,23 +107,33 @@ class AudioQueue(Iterable[AudioQueueElement]):
                 media: Media = self.instance.media_new_path(path)
                 self.player.set_media(media)
 
+                print("About to play")
                 self.player.play()
+                print("Play passed")
                 element.active = True
 
-                while self.is_playing:  # TODO: Check for skip?
+                print("Starting play-await loop")
+                while self.player.get_state() not in (VLCState.Ended, VLCState.Stopped):  # TODO: Check for skip?
                     # TODO: Wait for the duration or skip (whichever first)
                     await sleep(Settings.async_sleep_refresh_rate)
 
+                print("Play-await loop complete")
+
                 # TODO: release() media if needed
                 element.active = False
+                print("Closing resource")
                 element.resource.close()
                 self.current = None
+                print("Queue loop finish")
 
-    async def skip_all(self) -> bool:
-        if not self.is_playing and not self.queue:
+    async def skip_all(self, username: str) -> bool:
+        if self.state == AudioQueue.State.EMPTY:
             return False
         for element in self.queue.destructive_iter:
             element.skipped = True
+            element.active = False
+            await element.set_message(f"Skipped by {username}", skippable=False)
+        await self.skip(username)
         self.player.stop()
 
     async def pause(self) -> None:
@@ -131,12 +143,12 @@ class AudioQueue(Iterable[AudioQueueElement]):
 
         self.player.set_pause(False)
 
-    async def skip(self) -> bool:
-        if not self.is_playing and not self.queue:
+    async def skip(self, username: str) -> bool:
+        if self.current is None:
             return False
-        for element in self.queue.destructive_iter:
-            element.skipped = True
-            element.active = False
+        self.current.skipped = True
+        self.current.active = False
+        await self.current.set_message(f"Skipped by {username}", skippable=False)
         self.player.stop()
         return True
 

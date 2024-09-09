@@ -48,7 +48,7 @@ class BotConfig:
 
     @method_decorator(compose(arg_decorator, map_first_arg_decorator(map_all_args_decorator(UpdateHandlerContext))))
     def add_command_handler(self, f, name: str | Collection[str] | None = None, filters: BaseFilter | None = None,
-                            has_args: bool | int | None = None, blocking: bool = True):
+                            has_args: bool | int | None = None, blocking: bool = False):
         if name is None:
             name = f.__name__
         self.handlers.append(CommandHandler(name, f, filters=filters, has_args=has_args, block=blocking))

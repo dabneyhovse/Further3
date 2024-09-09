@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 class AsyncQueue[T](Iterable[T]):
     _async_iterator: AsyncIterator[T]
     _iterator_lock: Lock
-    _push_event: Event
+    _non_empty_event: Event
     _queue: deque[T]
 
     class AsyncIterator(AsyncIterator[T]):
@@ -19,9 +19,9 @@ class AsyncQueue[T](Iterable[T]):
             self.source = source
 
         async def __anext__(self) -> T:
-            while not self.source._queue:
-                await self.source._push_event.wait()
-            return self.source._queue.pop()
+            await self.source._non_empty_event.wait()
+            print("Received non-empty event")
+            return await self.source.pop()
 
     class DestructiveIterator(Iterator[T]):
         source: AsyncQueue[T]
@@ -40,7 +40,7 @@ class AsyncQueue[T](Iterable[T]):
         self._iterator_lock = Lock()
         self._async_iterator = AsyncQueue.AsyncIterator(self)
         self._destructive_iterator = AsyncQueue.DestructiveIterator(self)
-        self._push_event = Event()
+        self._non_empty_event = Event()
 
     def __iter__(self):
         return iter(self._queue)
@@ -63,17 +63,23 @@ class AsyncQueue[T](Iterable[T]):
 
     async def append(self, value: T) -> None:
         self._queue.append(value)
-        self._push_event.set()
+        self._non_empty_event.set()
 
     async def appendleft(self, value: T) -> None:
         self._queue.appendleft(value)
-        self._push_event.set()
+        self._non_empty_event.set()
 
     async def pop(self) -> T:
-        return self._queue.pop()
+        out: T = self._queue.pop()
+        if not self._queue:
+            self._non_empty_event.clear()
+        return out
 
     async def popleft(self) -> T:
-        return self._queue.popleft()
+        out: T = self._queue.popleft()
+        if not self._queue:
+            self._non_empty_event.clear()
+        return out
 
     def __bool__(self) -> bool:
         return bool(self._queue)
