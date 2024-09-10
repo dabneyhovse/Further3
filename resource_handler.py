@@ -1,12 +1,13 @@
 import os
 import shutil
+from pathlib import Path
 from typing import TextIO
 
 
 class ResourceHandler:
     class Resource:
-        def __init__(self, path: str):
-            self.path: str = path
+        def __init__(self, path: Path):
+            self.path: Path = path
             self.claimed: bool = True
             self.io_wrapper: TextIO | None = None
             self.is_open = True
@@ -48,6 +49,6 @@ class ResourceHandler:
     def claim(self):
         resource_path = os.path.join(self.directory, str(self.next_id))
         self.next_id += 1
-        claim = ResourceHandler.Resource(resource_path)
+        claim = ResourceHandler.Resource(Path(resource_path))
         self.claims.append(claim)
         return claim

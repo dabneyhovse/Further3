@@ -15,7 +15,7 @@ from audio_processing import audio_transform
 from bot_config import BotConfig
 from resource_handler import ResourceHandler
 
-from audio import AudioSegment
+from pydub_audio import AudioSegment
 
 
 class QueueElement:

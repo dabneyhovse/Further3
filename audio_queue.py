@@ -1,4 +1,4 @@
-from asyncio import sleep, get_event_loop, Future, CancelledError, Task, create_task, to_thread
+from asyncio import sleep, get_event_loop, Future, CancelledError, Task, to_thread
 from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -9,7 +9,7 @@ from vlc import Instance, MediaPlayer, Media
 from vlc import State as VLCState
 
 from async_queue import AsyncQueue
-from audio_processing import AudioProcessingSettings
+from audio_processing import AudioProcessingSettings, ffmpeg_pitch_shift
 from pytubefix import YouTube, Stream
 from resource_handler import ResourceHandler
 from settings import Settings
@@ -32,8 +32,8 @@ class AudioQueueElement:
         return not self.resource.is_open
 
     @staticmethod
-    def _download_audio(stream: Stream, resource_path: str) -> Path:
-        out = Path(stream.download(mp3=True, output_path=resource_path))
+    def _download_audio(stream: Stream, resource_path: Path) -> Path:
+        out = Path(stream.download(mp3=True, output_path=str(resource_path)))
         return out
 
     async def set_message(self, message: str, skippable: bool = True) -> None:
@@ -43,15 +43,18 @@ class AudioQueueElement:
         try:
             await self.set_message("Downloading")
             stream: Stream = self.video.streams.get_audio_only()
-            path: PathLike = await to_thread(self._download_audio, stream, self.resource.path)
+            path: Path = await to_thread(self._download_audio, stream, self.resource.path)
             await self.set_message("Processing")
-            # TODO: Process audio
+            if self.processing.pitch_shift != 0:
+                processed_path: Path = self.resource.path / "processed.mp3"
+                await ffmpeg_pitch_shift(self.processing.pitch_scale, path, processed_path)
+                path = processed_path
             await self.set_message("Queued")
+            self.path.set_result(path)
         except CancelledError:
             assert self.skipped
             self.path.set_result(None)
             raise
-        self.path.set_result(path)
 
     async def skip(self, username: str) -> bool:
         if self.skipped or self.freed:
@@ -125,6 +128,8 @@ class AudioQueue(Iterable[AudioQueueElement]):
                     continue
                 media: Media = self.instance.media_new_path(path)
                 self.player.set_media(media)
+
+                self.player.set_rate(element.processing.tempo_scale)
 
                 await element.set_message("Playing")
 

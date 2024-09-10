@@ -239,25 +239,25 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int):
                     scale: float | None = await parse_float(scale_str, context, query_message_id)
                     if scale is None:
                         return
-                    if not 1 / 8 <= scale <= 8:
+                    if not 1 / 4 <= scale <= 4:
                         await context.send_message(
-                            f"Time scale should be in the range [{1 / 8}, 8]",
+                            f"Time scale should be in the range [{1 / 4}, 4]",
                             parse_mode=ParseMode.HTML,
                             reply_to_message_id=query_message_id)
                         return
-                    postprocessing.time_stretch = scale
+                    postprocessing.tempo_scale = scale
                 case ["stretch" | "elongate" | "time stretch" | "slow" | "time slow" | "slow time" | "stretch time" |
                       "tempo slow" | "tempo" | "slow tempo" | "slow down", inv_scale_str]:
                     inv_scale: float | None = await parse_float(inv_scale_str, context, query_message_id)
                     if inv_scale is None:
                         return
-                    if not 1 / 8 <= inv_scale <= 8:
+                    if not 1 / 4 <= inv_scale <= 4:
                         await context.send_message(
-                            f"Time stretch should be in the range [{1 / 8}, 8]",
+                            f"Time stretch should be in the range [{1 / 4}, 4]",
                             parse_mode=ParseMode.HTML,
                             reply_to_message_id=query_message_id)
                         return
-                    postprocessing.time_stretch = 1 / inv_scale
+                    postprocessing.tempo_scale = 1 / inv_scale
                 case ["increase percussion" | "percussion" | "decrease melody" | "percussion balance", balance_str]:
                     balance: float | None = await parse_float(balance_str, context, query_message_id)
                     if balance is None:
@@ -282,7 +282,7 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int):
                     postprocessing.percussive_harmonic_balance = -balance
                 case ["nightcore" | "night-core" | "sped up" | "sped-up"]:
                     postprocessing.pitch_shift = 12 * 0.35
-                    postprocessing.time_stretch = 1.35
+                    postprocessing.tempo_scale = 1.35
                 case ["echo", strength_str]:
                     strength: float | None = await parse_float(strength_str, context, query_message_id)
                     if strength is None:

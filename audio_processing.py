@@ -1,21 +1,27 @@
+from asyncio import create_subprocess_shell, subprocess
 from dataclasses import dataclass
+from os import PathLike
+from pathlib import Path
+from sys import stderr
 
 import numpy as np
 from librosa.effects import pitch_shift, time_stretch, hpss
 from scipy.signal import convolve
 
-from audio import AudioSegment
+from pydub_audio import AudioSegment
+from settings import Settings
+from util import escape_str
 
 
 @dataclass
 class AudioProcessingSettings:
     pitch_shift: float = 0
-    time_stretch: float = 1
+    tempo_scale: float = 1
     percussive_harmonic_balance: float = 0
     echo: tuple[float, float, float] = (0, 0, 0)
 
     def __bool__(self) -> bool:
-        return self.pitch_shift != 0 or self.time_stretch != 1 or self.percussive_harmonic_balance != 0
+        return self.pitch_shift != 0 or self.tempo_scale != 1 or self.percussive_harmonic_balance != 0
 
     def __str__(self) -> str:
         out: str = "In"
@@ -27,12 +33,16 @@ class AudioProcessingSettings:
             out += f" \u2192 Percussion : Harmony = {percussion:.2f}% : {harmony:.2f}%"
         if self.pitch_shift != 0:
             out += f" \u2192 Pitch-Shift = {self.pitch_shift:.2f}"
-        if self.time_stretch != 1:
-            out += f" \u2192 Time-Stretch = {self.time_stretch:.2f}"
+        if self.tempo_scale != 1:
+            out += f" \u2192 Speed = {self.tempo_scale:.2f}"
         if all(self.echo):
             out += f" \u2192 Echo (power, distance, cos) = {self.echo:.2f}"
         out += " \u2192 Out"
         return out
+
+    @property
+    def pitch_scale(self) -> float:
+        return 2 ** (self.pitch_shift / 12)
 
 
 def audio_transform(audio: AudioSegment, settings: AudioProcessingSettings) -> AudioSegment:
@@ -49,8 +59,8 @@ def audio_transform(audio: AudioSegment, settings: AudioProcessingSettings) -> A
     if settings.pitch_shift:
         data: np.array = pitch_shift(data, sr=frame_rate, n_steps=settings.pitch_shift)
     # Stretch / compress time
-    if settings.time_stretch != 1:
-        data: np.array = time_stretch(data, rate=settings.time_stretch)
+    if settings.tempo_scale != 1:
+        data: np.array = time_stretch(data, rate=settings.tempo_scale)
     # Echo
     if all(settings.echo):
         drop_off: int = 512
@@ -67,3 +77,17 @@ def audio_transform(audio: AudioSegment, settings: AudioProcessingSettings) -> A
     if max_norm > 1:
         data: np.array = data / max_norm
     return AudioSegment.from_np(data.transpose(), frame_rate)
+
+
+async def ffmpeg_pitch_shift(scale: float, source_path: Path, dest_path: Path):
+    clean_source: str = escape_str(source_path.absolute().as_posix(), "\"")
+    clean_dest: str = escape_str(dest_path.absolute().as_posix(), "\"")
+    proc = await create_subprocess_shell(
+        f"ffmpeg -i \"{clean_source}\" -af asetrate=44100*{scale},aresample=44100,atempo=1/{scale} \"{clean_dest}\"",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    stdout_result, stderr_result = (bytes_str.decode() for bytes_str in await proc.communicate())
+    if Settings.debug and stderr_result:
+        print(f"FFMPEG STDErr:\n{stderr_result}\n", file=stderr)
+        print(f"FFMPEG STDOut:\n{stdout_result}\n", file=stderr)

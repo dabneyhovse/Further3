@@ -33,6 +33,9 @@ class AudioSegment:
         return np.array(self.wrapped.get_array_of_samples(), dtype=np.float32).reshape((-1, self.wrapped.channels)) / (
                 1 << (8 * self.wrapped.sample_width - 1))
 
+    def to_file(self, path: str):
+        self.wrapped.export(path, format="wav")
+
     def __getitem__(self, item) -> Self:
         return AudioSegment(self.wrapped.__getitem__(item))
 

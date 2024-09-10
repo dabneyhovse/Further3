@@ -132,3 +132,10 @@ def sliding_window[T, X](it: Iterable[T], n: int, extend_left: bool = False, ext
         yield tuple(window)
         window.append(elem)
     yield tuple(window)
+
+
+def escape_str(raw: str, seqs: Iterable[str], escape: str = "\\") -> str:
+    out: str = raw.replace(escape, escape + escape)
+    for seq in seqs:
+        out = out.replace(seq, escape + seq)
+    return out
