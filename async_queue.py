@@ -19,19 +19,20 @@ class AsyncQueue[T](Iterable[T]):
             self.source = source
 
         async def __anext__(self) -> T:
-            await self.source._non_empty_event.wait()
-            print("Received non-empty event")
-            return await self.source.pop()
+            while not self.source:
+                await self.source._non_empty_event.wait()
+            return await self.source.popleft()
 
     class DestructiveIterator(Iterator[T]):
         source: AsyncQueue[T]
 
-        def __init__(self, source: AsyncQueue[T]):
+        def __init__(self, source: AsyncQueue[T], reverse: bool = False):
             self.source = source
+            self.reverse = reverse
 
         def __next__(self) -> T:
             if self.source._queue:
-                return self.source._queue.popleft()
+                return self.source._queue.pop() if self.reverse else self.source._queue.popleft()
             else:
                 raise StopIteration
 
@@ -40,6 +41,7 @@ class AsyncQueue[T](Iterable[T]):
         self._iterator_lock = Lock()
         self._async_iterator = AsyncQueue.AsyncIterator(self)
         self._destructive_iterator = AsyncQueue.DestructiveIterator(self)
+        self._reverse_destructive_iterator = AsyncQueue.DestructiveIterator(self, reverse=True)
         self._non_empty_event = Event()
 
     def __iter__(self):
@@ -47,6 +49,10 @@ class AsyncQueue[T](Iterable[T]):
 
     @property
     def destructive_iter(self):
+        return self._destructive_iterator
+
+    @property
+    def reverse_destructive_iter(self):
         return self._destructive_iterator
 
     @asynccontextmanager

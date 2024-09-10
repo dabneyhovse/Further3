@@ -14,13 +14,6 @@ class Maybe[T](metaclass=GADT):
     Nothing: Maybe[T]
     Just: Callable[[T], Maybe[T]]
 
-    def __repr__(self):
-        match self:
-            case self.Nothing:
-                return "Nothing"
-            case self.Just(x):
-                return f"Just({repr(x)})"
-
 
 class Bool(metaclass=GADT):
     TrueBool: Bool

@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import asyncio
 import datetime
 import logging
 from asyncio import Future
+from collections.abc import Callable
 from typing import cast
 
 from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
@@ -14,6 +17,7 @@ import pytubefix
 from audio_processing import AudioProcessingSettings
 from audio_queue import AudioQueue, AudioQueueElement
 from bot_config import BotConfig, edit_message_text
+from gadt import GADT
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
 from pytubefix import Search, YouTube, Playlist
 from util import count_iterable
@@ -37,7 +41,7 @@ async def post_init(context: ApplicationHandlerContext):
     import traceback
     import signal
 
-    def debug(sig, frame):
+    def debug(_sig, frame):
         """Interrupt running process, and provide a python prompt for
         interactive debugging."""
         d = {'_frame': frame}  # Allow access to frame object.
@@ -67,61 +71,65 @@ def format_dict_message(details: dict[str, tuple[str, bool]]) -> str:
     return "\n".join(f"<u><b>{k}</b></u>: {v}" for (k, (v, show)) in details.items() if show)
 
 
-type tree_message = dict[str, tuple[str, bool]] | list[tree_message | tuple[str, tree_message]]
+class TreeMessage(metaclass=GADT):
+    Text: Callable[[str], TreeMessage]
+    InlineCode: Callable[[str], TreeMessage]
+    Sequence: Callable[[list[TreeMessage]], TreeMessage]
+    Named: Callable[[str, TreeMessage], TreeMessage]
+    Skip: TreeMessage
+
+    @property
+    def sequence_nesting_depth(self) -> int:
+        match self:
+            case TreeMessage.Sequence(sequence):
+                return 1 + max((sub.sequence_nesting_depth for sub in sequence), default=0)
+            case _:
+                return 0
+
+    def __str__(self) -> str:
+        indent = " " * 4
+
+        match self:
+            case TreeMessage.Skip:
+                return ""
+            case TreeMessage.Text(text):
+                return text
+            case TreeMessage.InlineCode(text):
+                return f"<code>{text}</code>"
+            case TreeMessage.Sequence(sequence):
+                return (
+                    ("\n" * self.sequence_nesting_depth).join(str(sub) for sub in sequence if sub != TreeMessage.Skip)
+                )
+            case TreeMessage.Named(key, TreeMessage.Sequence(_) as value):
+                return f"<u>{key}</u>:\n{indent}{str(value).replace('\n', '\n' + indent)}"
+            case TreeMessage.Named(key, value):
+                return f"<u>{key}</u>: {value}"
 
 
-def format_tree_message(details: tree_message) -> str:
-    indent = " " * 4
-
-    match details:
-        case dict():
-            return format_dict_message(details)
-        case list():
-            out = ""
-            for item in details:
-                match item:
-                    case (k, v):
-                        out += f"<u><b>{k}</b></u>:\n{indent}" + format_tree_message(v).replace("\n",
-                                                                                                f"\n{indent}")
-                    case _:
-                        out += format_tree_message(item)
-                out += "\n\n"
-            return out
-
-
-def format_add_video_status(video: YouTube, user: User, postprocessing: AudioProcessingSettings | None,
-                            status: str) -> str:
-    return format_tree_message({
-        "Queued song": (f"<code>{video.title}</code>", True),
-        "Author": (f"<code>{video.author}</code>", True),
-        "Queued by": (user.name, True),
-        "Duration": (str(datetime.timedelta(seconds=video.length)), True),
-        "Post-processing": (postprocessing, postprocessing),
-        "Status": (status, True),
-    })
-
-
-def format_add_playlist_video_status(video: YouTube, postprocessing: AudioProcessingSettings | None,
-                                     status: str) -> str:
-    return format_tree_message({
-        "Queued song": (f"<code>{video.title}</code>", True),
-        "Author": (f"<code>{video.author}</code>", True),
-        "Duration": (str(datetime.timedelta(seconds=video.length)), True),
-        "Post-processing": (postprocessing, postprocessing),
-        "Status": (status, True),
-    })
+def format_add_video_status(video: YouTube, user: User | None, postprocessing: AudioProcessingSettings | None,
+                            status: str | None) -> TreeMessage:
+    return TreeMessage.Sequence([
+        TreeMessage.Named("Queued song", TreeMessage.InlineCode(video.title)),
+        TreeMessage.Named("Author", TreeMessage.InlineCode(video.author)),
+        TreeMessage.Named("Queued by", TreeMessage.Text(user.name)) if user is not None else TreeMessage.Skip,
+        TreeMessage.Named("Duration", TreeMessage.Text(str(datetime.timedelta(seconds=video.length)))),
+        TreeMessage.Named("Post-processing", TreeMessage.Text(str(postprocessing)))
+        if postprocessing else TreeMessage.Skip,
+        TreeMessage.Named("Status", TreeMessage.Text(status)) if status is not None else TreeMessage.Skip
+    ])
 
 
 def format_add_playlist_status(playlist: Playlist, user: User, postprocessing: AudioProcessingSettings,
-                               status: str) -> str:
-    return format_tree_message({
-        "Queued playlist": (f"<code>{playlist.title}</code>", True),
-        "Owner": (f"<code>{playlist.owner}</code>", True),
-        "Queued by": (user.name, True),
-        "Songs": (count_iterable(playlist.videos), True),
-        "Post-processing": (postprocessing, postprocessing),
-        "Status": (status, True),
-    })
+                               status: str) -> TreeMessage:
+    return TreeMessage.Sequence([
+        TreeMessage.Named("Queued playlist", TreeMessage.InlineCode(playlist.title)),
+        TreeMessage.Named("Owner", TreeMessage.InlineCode(playlist.owner)),
+        TreeMessage.Named("Queued by", TreeMessage.Text(user.name)),
+        TreeMessage.Named("Songs", TreeMessage.Text(str(count_iterable(playlist.videos)))),
+        TreeMessage.Named("Post-processing", TreeMessage.Text(str(postprocessing)))
+        if postprocessing else TreeMessage.Skip,
+        TreeMessage.Named("Status", TreeMessage.Text(status))
+    ])
 
 
 def find_video(query_text: str) -> YouTube | None:
@@ -144,49 +152,50 @@ def find_playlist(query_text: str) -> Playlist | None:
         return playlists[0] if playlists else None
 
 
-def format_get_queue(queue: AudioQueue) -> str:
+def format_get_queue(queue: AudioQueue) -> TreeMessage:
     songs: list[AudioQueueElement] = [element for element in queue if not element.freed]
-    return format_tree_message(
-        [
-            {
-                "State": (queue.state, True),
-                "Songs": (len(songs), True),
-                "Remaining play time": (
-                    datetime.timedelta(
-                        seconds=round(
-                            sum(element.video.length for element in songs) + (
-                                queue.current.video.length - queue.player.get_time() / 1000
-                                if queue.state in [AudioQueue.State.PLAYING, AudioQueue.State.PAUSED] else
-                                0
-                            )
+    return TreeMessage.Sequence([
+        TreeMessage.Sequence([
+            TreeMessage.Named("State", TreeMessage.Text(str(queue.state))),
+            TreeMessage.Named("Songs", TreeMessage.Text(str(len(songs)))),
+            TreeMessage.Named(
+                "Remaining play time",
+                TreeMessage.Text(str(datetime.timedelta(
+                    seconds=round(
+                        sum(element.video.length for element in songs) +
+                        (
+                            queue.current.video.length - queue.player.get_time() / 1000
+                            if queue.state in [AudioQueue.State.PLAYING, AudioQueue.State.PAUSED] else
+                            0
                         )
-                    ),
-                    True)
-            },
-            ("Current", {
-                "Queued song": (f"<code>{queue.current.video.title}</code>", True),
-                "Author": (f"<code>{queue.current.video.author}</code>", True),
-                "Duration": (str(datetime.timedelta(seconds=queue.current.video.length)), True),
-                "Remaining": queue.current.video.length - queue.player.get_time() / 1000,
-                "Post-processing": (queue.current.processing, queue.current.processing),
-            } if queue.current is not None else "<None>"),
-            ("Queue", [{
-                "Queued song": (f"<code>{element.video.title}</code>", True),
-                "Author": (f"<code>{element.video.author}</code>", True),
-                "Duration": (str(datetime.timedelta(seconds=element.video.length)), True),
-                "Post-processing": (element.processing, element.processing)
-            } for element in songs] if songs else "<Empty>")
-        ]
-    )
+                    )
+                )))
+            )
+        ]),
+        TreeMessage.Named(
+            "Current",
+            format_add_video_status(queue.current.video, None, queue.current.processing, None)
+            if queue.current is not None else
+            TreeMessage.Text("&lt;None&gt;")
+        ),
+        TreeMessage.Named(
+            "Queue",
+            TreeMessage.Sequence([
+                TreeMessage.Sequence([
+                    format_add_video_status(element.video, None, element.processing, None)
+                ])
+                for element in queue if not element.skipped
+            ]) if queue.queue else TreeMessage.Text("&lt;Empty&gt;")
+        )
+    ])
 
 
 @bot_config.add_command_handler(["q", "queue", "queued"], filters=~filters.UpdateType.EDITED_MESSAGE, has_args=False)
 async def get_queue(context: UpdateHandlerContext):
-    print("Starting get_queue")
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
     await context.send_message(
-        format_get_queue(context.run_data.queue),
+        str(format_get_queue(context.run_data.queue)),
         parse_mode=ParseMode.HTML,
         reply_to_message_id=query_message_id)
 
@@ -308,8 +317,7 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int):
 async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User, query_message_id: int,
                       postprocessing: AudioProcessingSettings, part_of_playlist: bool = False):
     message: Message = await context.send_message(
-        (format_add_playlist_video_status if part_of_playlist else format_add_video_status)(
-            video, user, postprocessing, "Downloading"),
+        str(format_add_video_status(video, user if not part_of_playlist else None, postprocessing, "Downloading")),
         parse_mode=ParseMode.HTML,
         reply_to_message_id=query_message_id
     )
@@ -323,8 +331,7 @@ async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User,
         try:
             await edit_message_text(
                 message,
-                (format_add_playlist_video_status if part_of_playlist else format_add_video_status)(
-                    video, user, postprocessing, status),
+                str(format_add_video_status(video, user if not part_of_playlist else None, postprocessing, status)),
                 parse_mode=ParseMode.HTML,
                 reply_markup=(reply_markup if skip_index is not None else None)
             )
@@ -333,30 +340,30 @@ async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User,
                 raise
 
     await message_edit_status("Adding to queue", None)
-    id: int = context.run_data.queue.get_id()
     queue_element: AudioQueueElement = AudioQueueElement(
-        id=id,
+        id=context.run_data.queue.get_id(),
         resource=download_resource,
         video=video,
         processing=postprocessing,
         message_setter=message_edit_status,
-        path=Future()
+        path=Future(),
+        download_task=Future()
     )
     await context.run_data.queue.add(queue_element)
-    print("Add completed")
 
 
 async def queue_playlist(context: UpdateHandlerContext, playlist: Playlist, user: User, query_message_id: int,
                          postprocessing: AudioProcessingSettings):
     message: Message = await context.send_message(
-        format_add_playlist_status(playlist, user, postprocessing, "Loading"),
+        str(format_add_playlist_status(playlist, user, postprocessing, "Loading")),
         parse_mode=ParseMode.HTML,
         reply_to_message_id=query_message_id
     )
     for video in playlist.videos:
         await queue_video(context, video, user, message.message_id, postprocessing, part_of_playlist=True)
     await edit_message_text(
-        message, format_add_playlist_status(playlist, user, postprocessing, "Done loading"),
+        message,
+        str(format_add_playlist_status(playlist, user, postprocessing, "Done loading")),
         parse_mode=ParseMode.HTML
     )
 
@@ -419,11 +426,11 @@ async def skip(context: UpdateHandlerContext):
     await query_message.set_reaction("👍" if result else "🤷")
 
 
-@bot_config.add_command_handler(["skip_all", "clear"], filters=~filters.UpdateType.EDITED_MESSAGE)
+@bot_config.add_command_handler(["skip_all", "clear", "skipall"], filters=~filters.UpdateType.EDITED_MESSAGE)
 async def skip_all(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     user: User = context.update.effective_user
-    context.run_data.queue.skip_all(user.name)
+    await context.run_data.queue.skip_all(user.name)
     await query_message.set_reaction("👍")
 
 

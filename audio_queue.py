@@ -1,4 +1,4 @@
-from asyncio import sleep, get_event_loop, Future
+from asyncio import sleep, get_event_loop, Future, CancelledError, Task, create_task, to_thread
 from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -8,7 +8,6 @@ from pathlib import Path
 from vlc import Instance, MediaPlayer, Media
 from vlc import State as VLCState
 
-from async_multiprocessing import await_process
 from async_queue import AsyncQueue
 from audio_processing import AudioProcessingSettings
 from pytubefix import YouTube, Stream
@@ -23,7 +22,8 @@ class AudioQueueElement:
     video: YouTube
     processing: AudioProcessingSettings
     message_setter: Callable[[str, int], Coroutine[None, None, None]]
-    path: Future[PathLike]
+    path: Future[PathLike | None]
+    download_task: Future[Task]
     active: bool = False
     skipped: bool = False
 
@@ -34,23 +34,42 @@ class AudioQueueElement:
     @staticmethod
     def _download_audio(stream: Stream, resource_path: str) -> Path:
         out = Path(stream.download(mp3=True, output_path=resource_path))
-        print("Downloaded")
         return out
 
     async def set_message(self, message: str, skippable: bool = True) -> None:
         await self.message_setter(message, self.id if skippable else None)
 
     async def download(self):
-        await self.set_message("Downloading")
-        stream: Stream = self.video.streams.get_audio_only()
-        path: PathLike = await await_process(self._download_audio, args=(stream, self.resource.path))
-        print("Download process await complete")
-        await self.set_message("Processing")
-        # TODO: Process audio
-        await self.set_message("Queued")
-        print("Message setters completed")
+        try:
+            await self.set_message("Downloading")
+            stream: Stream = self.video.streams.get_audio_only()
+            path: PathLike = await to_thread(self._download_audio, stream, self.resource.path)
+            await self.set_message("Processing")
+            # TODO: Process audio
+            await self.set_message("Queued")
+        except CancelledError:
+            assert self.skipped
+            self.path.set_result(None)
+            raise
         self.path.set_result(path)
-        print("Download function complete")
+
+    async def skip(self, username: str) -> bool:
+        if self.skipped or self.freed:
+            return False
+        self.skipped = True
+        self.active = False
+        if not self.active:
+            download_task = await self.download_task
+            download_task.cancel()
+        self.resource.close()
+        await self.set_message(f"Skipped by {username}", skippable=False)
+
+    async def finish(self):
+        if not self.freed:
+            self.resource.close()
+        self.active = False
+        if not self.skipped:
+            await self.set_message(f"Played", skippable=False)
 
 
 class AudioQueue(Iterable[AudioQueueElement]):
@@ -90,51 +109,60 @@ class AudioQueue(Iterable[AudioQueueElement]):
         get_event_loop().create_task(self.play_queue())
 
     async def add(self, element: AudioQueueElement):
-        print("Adding element to queue")
         await self.queue.append(element)
-        print("Append complete")
-        await element.download()
-        print("Download await received")
+        download_task = get_event_loop().create_task(element.download())
+        element.download_task.set_result(download_task)
 
     async def play_queue(self) -> None:
         async with self.queue.async_iter() as async_iterator:
             async for element in async_iterator:
-                print("Queue loop start")
+                if element.skipped:
+                    continue
                 self.current = element
-                print("Waiting for path")
                 path: str = await element.path
-                print("Acquired path")
+                if path is None:
+                    assert element.skipped
+                    continue
                 media: Media = self.instance.media_new_path(path)
                 self.player.set_media(media)
 
-                print("About to play")
+                await element.set_message("Playing")
+
                 self.player.play()
-                print("Play passed")
                 element.active = True
 
-                print("Starting play-await loop")
-                while self.player.get_state() not in (VLCState.Ended, VLCState.Stopped):  # TODO: Check for skip?
+                while self.player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not element.skipped:
                     # TODO: Wait for the duration or skip (whichever first)
                     await sleep(Settings.async_sleep_refresh_rate)
 
-                print("Play-await loop complete")
+                if self.player.get_state() not in (VLCState.Ended, VLCState.Stopped):
+                    self.player.stop()
 
                 # TODO: release() media if needed
-                element.active = False
-                print("Closing resource")
-                element.resource.close()
+                await element.finish()
                 self.current = None
-                print("Queue loop finish")
+
+    async def skip(self, username: str) -> bool:
+        if self.current is None:
+            return False
+        await self.current.skip(username)
+        return True
 
     async def skip_all(self, username: str) -> bool:
         if self.state == AudioQueue.State.EMPTY:
             return False
-        for element in self.queue.destructive_iter:
-            element.skipped = True
-            element.active = False
-            await element.set_message(f"Skipped by {username}", skippable=False)
-        await self.skip(username)
-        self.player.stop()
+        for element in self.queue.reverse_destructive_iter:
+            await element.skip(username)
+        await self.current.skip(username)
+
+    async def skip_specific(self, username: str, id: int) -> bool:
+        if self.current is not None and self.current.id == id:
+            return await self.skip(username)
+        for element in self.queue:
+            if element.id == id:
+                await element.skip(username)
+                return True
+        return False
 
     async def pause(self) -> None:
         self.player.set_pause(True)
@@ -142,15 +170,6 @@ class AudioQueue(Iterable[AudioQueueElement]):
     async def resume(self) -> None:
 
         self.player.set_pause(False)
-
-    async def skip(self, username: str) -> bool:
-        if self.current is None:
-            return False
-        self.current.skipped = True
-        self.current.active = False
-        await self.current.set_message(f"Skipped by {username}", skippable=False)
-        self.player.stop()
-        return True
 
     async def set_digital_volume(self, volume: float) -> bool:
         absolute_volume: float = volume * Settings.hundred_percent_volume_value
@@ -170,10 +189,6 @@ class AudioQueue(Iterable[AudioQueueElement]):
 
     @property
     def state(self) -> State:
-        print(f"Current state:"
-              f"\n\tself.player.get_state(): {self.player.get_state()}"
-              f"\n\tself.queue: {self.queue}"
-              f"\n\tself.current: {self.current}")
         match (self.player.get_state(), bool(self.queue), self.current is not None):
             case (VLCState.Playing, _, True):
                 return AudioQueue.State.PLAYING
@@ -189,11 +204,13 @@ class AudioQueue(Iterable[AudioQueueElement]):
                 return AudioQueue.State.LOADING
             case (VLCState.Opening | VLCState.Buffering, _, True):
                 return AudioQueue.State.LOADING
-            case _:
-                print(f"Unknown state:"
-                      f"\n\tself.player.get_state(): {self.player.get_state()}"
-                      f"\n\tself.queue: {self.queue}"
-                      f"\n\tself.current: {self.current}")
+            case (player_state, queue_nonempty, current_set):
+                print(f"Unknown audio queue state error:\n"
+                      f"\tself.player.get_state(): {player_state}\n"
+                      f"\tbool(self.queue): {queue_nonempty}\n"
+                      f"\tself.current is not None: {current_set}"
+                      f"\tself.queue: {self.queue}"
+                      f"\tself.current: {self.current}")
                 return AudioQueue.State.UNKNOWN_ERROR
 
     def get_id(self) -> int:

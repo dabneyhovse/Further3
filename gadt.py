@@ -15,10 +15,16 @@ def _gadt_init(self, *_args, **_kwargs):
 
 
 def _gadt_repr(self):
-    return self._constr_name_ + (
-        ("(" + ", ".join(repr(datum) for datum in self._construction_data_) + ")")
-        if self._construction_data_ is not None else ""
+    return self.__constr_name__ + (
+        ("(" + ", ".join(repr(datum) for datum in self.__construction_data__) + ")")
+        if self.__construction_data__ is not None else ""
     )
+
+
+def _gadt_eq(self, other):
+    return (isinstance(other, self.__origin__) and
+            self.__constr__ is other.__constr__ and
+            self.__construction_data__ == other.__construction_data__)
 
 
 type Constructor = GADT | CompoundConstructor
@@ -28,17 +34,19 @@ class GADT(type):
     @staticmethod
     def update_namespace(namespace):
         updated_namespace = {
-            "__repr__": _gadt_repr
+            "__repr__": _gadt_repr,
+            "__eq__": _gadt_eq
         }  # Defaults
         updated_namespace.update(namespace)
         updated_namespace.update({
             "__init__": _gadt_init
         })  # Overrides
         new_annotations = {
-            "_constr_name_": str,
-            "_constr_": Constructor,
-            "_construction_data_": list[Any] | None,
-            "_constr_type_": ConstrType
+            "__constr_name__": str,
+            "__constr__": Constructor,
+            "__construction_data__": list[Any] | None,
+            "__constr_type__": ConstrType,
+            "__origin__": GADT
         }
         if "__annotations__" in updated_namespace:
             updated_namespace["__annotations__"].update(new_annotations)
@@ -78,16 +86,20 @@ class GADT(type):
 
                 if issubclass(origin, cls):
                     obj: cls = object.__new__(cls)  # noqa
-                    setattr(obj, "_constr_name_", constr_name)
-                    setattr(obj, "_constr_", obj)
-                    setattr(obj, "_construction_data_", None)
-                    setattr(obj, "_constr_type_", constr_type)
+                    obj.__constr_name__ = constr_name
+                    obj.__constr__ = obj
+                    obj.__construction_data__ = None
+                    obj.__constr_type__ = constr_type
+                    obj.__origin__ = cls
                     setattr(cls, constr_name, obj)
                 elif issubclass(origin, (CollectionsABCCallable, TypingCallable)):
                     match constr_type.__reduce__():
                         case (_, (_, (_, result_type))):
                             result_origin = (
                                 result_type.__origin__ if hasattr(result_type, "__origin__") else result_type)
+
+                            if not isinstance(result_origin, type):
+                                raise type_error
 
                             if not issubclass(result_origin, cls):
                                 raise type_error
@@ -108,7 +120,7 @@ class CompoundConstructor(GADT):
             case (_, (_, (arg_types, result_type))):
                 def __new__(cls, *_data):
                     obj = object.__new__(cls)
-                    obj._constr_ = type(cls)
+                    obj.__constr__ = type(cls)
                     return obj
 
                 def __init__(self, *data):
@@ -116,33 +128,33 @@ class CompoundConstructor(GADT):
                         raise TypeError(f"{gadt_cls.__name__}.{constr_name} takes exactly {len(arg_types)} "
                                         f"argument{'s' if len(arg_types) != 1 else ''} "
                                         f"({len(data)} given)")
-                    self._construction_data_ = data
-                    self._constr_name_ = constr_name
-                    self._constr_type_ = constr_type
+                    self.__construction_data__ = data
+                    self.__constr_name__ = constr_name
+                    self.__constr_type__ = constr_type
 
                     for i, datum in enumerate(data):
-                        setattr(self, f"_construction_data_{i}", datum)
+                        setattr(self, f"__construction_data__{i}", datum)
 
                 cls_bases: tuple[type, ...] = (gadt_cls,)
                 cls_namespace = dict(gadt_cls.__dict__)
                 cls_namespace.update({
                     "__annotations__": {
-                        "_arity_": int,
-                        "_origin_": GADT,
-                        "_name_": str,
-                        "_type_": _CompoundConstrType,
-                        "_arg_types_": tuple[type, ...],
-                        "_result_type_": type
+                        "__arity__": int,
+                        "__origin__": GADT,
+                        "__name__": str,
+                        "__type__": _CompoundConstrType,
+                        "__arg_types__": tuple[type, ...],
+                        "__result_type__": type
                     },
                     "__new__": __new__,
                     "__init__": __init__,
-                    "__match_args__": tuple(f"_construction_data_{i}" for i in range(len(arg_types))),
-                    "_arity_": len(arg_types),
-                    "_origin_": gadt_cls,
-                    "_name_": constr_name,
-                    "_type_": constr_type,
-                    "_arg_types_": tuple(arg_types),
-                    "_result_type_": result_type
+                    "__match_args__": tuple(f"__construction_data__{i}" for i in range(len(arg_types))),
+                    "__arity__": len(arg_types),
+                    "__origin__": gadt_cls,
+                    "__name__": constr_name,
+                    "__type__": constr_type,
+                    "__arg_types__": tuple(arg_types),
+                    "__result_type__": result_type
                 })
                 return constr_name, cls_bases, cls_namespace
             case _:
