@@ -1,21 +1,60 @@
+from __future__ import annotations
+
 import logging
 import re
-from collections.abc import Collection
+from collections.abc import Collection, Callable
 
-from telegram import Message
+from telegram import Message, User, Bot, Chat
+from telegram.constants import ParseMode
 from telegram.ext import MessageHandler, ApplicationBuilder, CommandHandler, BaseHandler, PicklePersistence, \
     CallbackQueryHandler
 from telegram.ext.filters import BaseFilter
 
-from decorator_tools import arg_decorator, method_decorator, map_first_arg_decorator, map_all_args_decorator
+from decorator_tools import arg_decorator, method_decorator, map_first_arg_decorator, map_all_args_decorator, \
+    map_all_to_first_arg_decorator
 from formatted_text import FormattedText
 from funcs import compose
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
 from resource_handler import ResourceHandler
+from user_selector import UserSelector
+
+
+def guard_permissions(f, *args, permissions: UserSelector | None = None,
+                      user_selector_filter: UserSelector | None = None, **kwargs):
+    async def guarded(context: UpdateHandlerContext):
+        query_message: Message = context.update.message
+        query_message_id = query_message.message_id
+
+        bot: Bot = context.bot
+        user_id: int = context.update.effective_user.id
+        chat: Chat = context.chat
+
+        if user_selector_filter is not None and not await user_selector_filter.matches(bot, user_id, chat):
+            return
+        if permissions is not None and not await permissions.matches(bot, user_id, chat):
+            async def user_name_lookup(u_id: int) -> str:
+                return f"&lt;User {u_id}&gt;"
+
+            async def chat_name_lookup(c_id: int) -> str:
+                chat_name: str = (await context.bot.get_chat(c_id)).effective_name
+                return f"\"{chat_name}\""
+
+            permission_description: str = await permissions.describe(user_name_lookup, chat_name_lookup)
+            await context.send_message(
+                f"This command can only be used {permission_description}.",
+                parse_mode=ParseMode.HTML,
+                reply_to_message_id=query_message_id
+            )
+            # TODO: Silly "opinion" reaction or response
+            return
+        await f(context)
+
+    return guarded
 
 
 class BotConfig:
-    def __init__(self, bot_token_path: str, persistence_file: None | str, resource_dir: None | str) -> None:
+    def __init__(self, bot_token_path: str, persistence_file: str | None, resource_dir: str | None,
+                 default_permissions: UserSelector | None = None) -> None:
         logging.basicConfig(
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
         )
@@ -32,6 +71,9 @@ class BotConfig:
         if resource_dir:
             self.resource_handler: ResourceHandler = ResourceHandler(resource_dir)
 
+        self.default_permissions: UserSelector = \
+            default_permissions if default_permissions is not None else UserSelector.Always
+
         logging.basicConfig(
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             level=logging.INFO
@@ -46,11 +88,24 @@ class BotConfig:
     def add_post_init_handler(self, f):
         self.post_init_handler = f
 
-    @method_decorator(compose(arg_decorator, map_first_arg_decorator(map_all_args_decorator(UpdateHandlerContext))))
+    # TODO: Check permissions and filter
+    @method_decorator(
+        compose(
+            arg_decorator,
+            compose(
+                map_all_to_first_arg_decorator(guard_permissions),
+                map_first_arg_decorator(
+                    map_all_args_decorator(UpdateHandlerContext)
+                )
+            )
+        )
+    )
     def add_command_handler(self, f, name: str | Collection[str] | None = None, filters: BaseFilter | None = None,
-                            has_args: bool | int | None = None, blocking: bool = False):
+                            has_args: bool | int | None = None, blocking: bool = False,
+                            permissions: UserSelector | None = None, user_selector_filter: UserSelector | None = None):
         if name is None:
             name = f.__name__
+
         self.handlers.append(CommandHandler(name, f, filters=filters, has_args=has_args, block=blocking))
 
     @method_decorator(compose(arg_decorator, map_first_arg_decorator(map_all_args_decorator(UpdateHandlerContext))))

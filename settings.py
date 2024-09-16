@@ -7,9 +7,9 @@ from persistent_singleton import persistent_singleton, PersistenceSource
 class Settings:
     debug: bool = False
 
+    registered_chat_ids: list[int] = []
+
     async_sleep_refresh_rate: float = 0.25
 
     max_absolute_volume: float = 1
     hundred_percent_volume_value: float = 0.75
-
-

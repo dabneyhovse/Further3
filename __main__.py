@@ -20,6 +20,8 @@ from bot_config import BotConfig, edit_message_text
 from gadt import GADT
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
 from pytubefix import Search, YouTube, Playlist
+from settings import Settings
+from user_selector import UserSelector
 from util import count_iterable
 
 BOT_TOKEN_FILE = "sensitive/bot_token.txt"
@@ -368,8 +370,12 @@ async def queue_playlist(context: UpdateHandlerContext, playlist: Playlist, user
     )
 
 
-@bot_config.add_command_handler(["q", "queue", "add", "enqueue"], filters=~filters.UpdateType.EDITED_MESSAGE,
-                                has_args=True)
+@bot_config.add_command_handler(
+    ["q", "queue", "add", "enqueue"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    has_args=True,
+    permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+)
 async def enqueue(context: UpdateHandlerContext):
     user: User = context.update.effective_user
     query_message_id: int = context.update.message.message_id
@@ -404,21 +410,33 @@ async def callback_query_handler(context: UpdateHandlerContext):
     await context.run_data.queue.skip_specific(user.name, skippable_element_index)
 
 
-@bot_config.add_command_handler(["pause", "stop"], filters=~filters.UpdateType.EDITED_MESSAGE)
+@bot_config.add_command_handler(
+    ["pause", "stop"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+)
 async def pause(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     result: bool = await context.run_data.queue.pause()
     await query_message.set_reaction("👍" if result else "🤷")
 
 
-@bot_config.add_command_handler(["play", "resume", "unpause"], filters=~filters.UpdateType.EDITED_MESSAGE)
+@bot_config.add_command_handler(
+    ["play", "resume", "unpause"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+)
 async def play(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     result: bool = context.run_data.queue.unpause()
     await query_message.set_reaction("👍" if result else "🤷")
 
 
-@bot_config.add_command_handler("skip", filters=~filters.UpdateType.EDITED_MESSAGE)
+@bot_config.add_command_handler(
+    "skip",
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+)
 async def skip(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     user: User = context.update.effective_user
@@ -426,7 +444,11 @@ async def skip(context: UpdateHandlerContext):
     await query_message.set_reaction("👍" if result else "🤷")
 
 
-@bot_config.add_command_handler(["skip_all", "clear", "skipall"], filters=~filters.UpdateType.EDITED_MESSAGE)
+@bot_config.add_command_handler(
+    ["skip_all", "clear", "skipall"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+)
 async def skip_all(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     user: User = context.update.effective_user
@@ -434,7 +456,12 @@ async def skip_all(context: UpdateHandlerContext):
     await query_message.set_reaction("👍")
 
 
-@bot_config.add_command_handler(["volume", "vol", "v"], filters=~filters.UpdateType.EDITED_MESSAGE, has_args=1)
+@bot_config.add_command_handler(
+    ["volume", "vol", "v"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    has_args=1,
+    permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+)
 async def set_volume(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     try:
@@ -453,7 +480,11 @@ async def set_volume(context: UpdateHandlerContext):
             await query_message.set_reaction("🙉")
 
 
-@bot_config.add_command_handler(["volume", "vol", "v"], filters=~filters.UpdateType.EDITED_MESSAGE, has_args=False)
+@bot_config.add_command_handler(
+    ["volume", "vol", "v"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    has_args=False
+)
 async def get_volume(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
@@ -463,26 +494,59 @@ async def get_volume(context: UpdateHandlerContext):
         reply_to_message_id=query_message_id)
 
 
-@bot_config.add_command_handler(["sys_volume", "sys_vol", "sys_v"], filters=~filters.UpdateType.EDITED_MESSAGE,
-                                has_args=1)
-async def set_sys_volume(context: UpdateHandlerContext):
-    query_message: Message = context.update.message
-    try:
-        new_volume: float = float(context.args[0])
-    except ValueError:
-        await query_message.set_reaction(opinions.lol_emoji())
-        return
-    context.run_data.queue.set_sys_volume(new_volume)
-    await query_message.set_reaction("👍")
+# @bot_config.add_command_handler(
+#     ["sys_volume", "sys_vol", "sys_v"],
+#     filters=~filters.UpdateType.EDITED_MESSAGE,
+#     has_args=1,
+#     permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+# )
+# async def set_sys_volume(context: UpdateHandlerContext):
+#     query_message: Message = context.update.message
+#     try:
+#         new_volume: float = float(context.args[0])
+#     except ValueError:
+#         await query_message.set_reaction(opinions.lol_emoji())
+#         return
+#     context.run_data.queue.set_sys_volume(new_volume)
+#     await query_message.set_reaction("👍")
+#
+#
+# @bot_config.add_command_handler(
+#     ["sys_volume", "sys_vol", "sys_v"],
+#     filters=~filters.UpdateType.EDITED_MESSAGE,
+#     has_args=False
+# )
+# async def sys_volume(context: UpdateHandlerContext):
+#     query_message: Message = context.update.message
+#     query_message_id = query_message.message_id
+#     await context.send_message(
+#         f"Current volume: {context.run_data.queue.get_sys_volume()}",
+#         parse_mode=ParseMode.HTML,
+#         reply_to_message_id=query_message_id)
 
 
-@bot_config.add_command_handler(["sys_volume", "sys_vol", "sys_v"], filters=~filters.UpdateType.EDITED_MESSAGE,
-                                has_args=False)
-async def sys_volume(context: UpdateHandlerContext):
+@bot_config.add_command_handler(
+    "wee",
+    filters=~filters.UpdateType.EDITED_MESSAGE
+)
+async def wee(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
     await context.send_message(
-        f"Current volume: {context.run_data.queue.get_sys_volume()}",
+        f"hoo",
+        parse_mode=ParseMode.HTML,
+        reply_to_message_id=query_message_id)
+
+
+@bot_config.add_command_handler(
+    "hoo",
+    filters=~filters.UpdateType.EDITED_MESSAGE
+)
+async def hoo(context: UpdateHandlerContext):
+    query_message: Message = context.update.message
+    query_message_id = query_message.message_id
+    await context.send_message(
+        f"wee",
         parse_mode=ParseMode.HTML,
         reply_to_message_id=query_message_id)
 

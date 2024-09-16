@@ -39,6 +39,18 @@ def map_first_arg_decorator[S, T, U, ** P](f: Callable[Concatenate[T, P], U], m:
     return decorator
 
 
+# map_arg_decorator(m)(f) produces a function that applies the map, m, over the first argument to f using the rest of
+# the args passed to f
+@arg_decorator
+def map_all_to_first_arg_decorator[S, T, U, ** P](f: Callable[Concatenate[T, P], U],
+                                                  m: Callable[Concatenate[S, P], T]) -> \
+        Callable[Concatenate[S, P], U]:
+    def decorator(x: S, *args: P.args, **kwargs: P.kwargs) -> U:
+        return f(m(x, *args, **kwargs), *args, **kwargs)
+
+    return decorator
+
+
 # map_arg_decorator(m)(f) produces a function that applies the map, m, over every argument to f
 @arg_decorator
 def map_all_args_decorator[T, U, ** P](f: Callable[[T], U], m: Callable[P, T]) -> Callable[P, U]:
