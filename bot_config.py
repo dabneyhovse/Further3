@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Collection, Callable
+from functools import wraps, cached_property
 
 from telegram import Message, User, Bot, Chat
 from telegram.constants import ParseMode
@@ -15,12 +16,16 @@ from decorator_tools import arg_decorator, method_decorator, map_first_arg_decor
 from formatted_text import FormattedText
 from funcs import compose
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
+from help import HelpMessage
 from resource_handler import ResourceHandler
+from tree_message import TreeMessage
 from user_selector import UserSelector
+from util import trim_docstring
 
 
-def guard_permissions(f, *args, permissions: UserSelector | None = None,
-                      user_selector_filter: UserSelector | None = None, **kwargs):
+def guard_permissions(f, *_args, permissions: UserSelector | None = None,
+                      user_selector_filter: UserSelector | None = None, **_kwargs):
+    @wraps(f)
     async def guarded(context: UpdateHandlerContext):
         query_message: Message = context.update.message
         query_message_id = query_message.message_id
@@ -62,6 +67,8 @@ class BotConfig:
 
         self.logger: logging.Logger = logging.getLogger(__name__)
 
+        self.help_messages: list[HelpMessage] = []
+
         with open(bot_token_path, 'r') as bot_token_file:
             self.bot_token: str = bot_token_file.read()
 
@@ -88,7 +95,6 @@ class BotConfig:
     def add_post_init_handler(self, f):
         self.post_init_handler = f
 
-    # TODO: Check permissions and filter
     @method_decorator(
         compose(
             arg_decorator,
@@ -105,6 +111,14 @@ class BotConfig:
                             permissions: UserSelector | None = None, user_selector_filter: UserSelector | None = None):
         if name is None:
             name = f.__name__
+
+        self.help_messages.append(HelpMessage(
+            name=name,
+            has_args=has_args,
+            permissions=permissions,
+            user_selector_filter=user_selector_filter,
+            docstring=trim_docstring(f.__doc__)
+        ))
 
         self.handlers.append(CommandHandler(name, f, filters=filters, has_args=has_args, block=blocking))
 
@@ -135,6 +149,11 @@ class BotConfig:
         application.bot_config = self
 
         application.run_polling()
+
+    async def get_help(self, context: UpdateHandlerContext) -> FormattedText:
+        return FormattedText(
+            str(TreeMessage.Sequence([await message.display(context) for message in self.help_messages]))
+        )
 
 
 async def edit_message_text(message: Message, text: str | FormattedText, **kwargs):

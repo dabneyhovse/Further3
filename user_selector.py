@@ -463,5 +463,4 @@ class UserSelector(metaclass=GADT):
                        chat_name_lookup: Callable[[int], Coroutine[None, None, str]]
                        ) -> str:
         simplified: UserSelector = self.simplify()
-        print(simplified)
         return (await simplified.describe_rec(user_name_lookup, chat_name_lookup))[0]

@@ -4,7 +4,7 @@ import asyncio
 import datetime
 import logging
 from asyncio import Future
-from collections.abc import Callable
+from math import log
 from typing import cast
 
 from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
@@ -14,14 +14,14 @@ from telegram.ext import filters
 
 import opinions
 import pytubefix
+from tree_message import TreeMessage
 from audio_processing import AudioProcessingSettings
 from audio_queue import AudioQueue, AudioQueueElement
 from bot_config import BotConfig, edit_message_text
-from gadt import GADT
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
 from pytubefix import Search, YouTube, Playlist
 from settings import Settings
-from user_selector import UserSelector
+from user_selector import UserSelector, ChatTypeFlag, MembershipStatusFlag
 from util import count_iterable
 
 BOT_TOKEN_FILE = "sensitive/bot_token.txt"
@@ -67,45 +67,6 @@ async def post_init(context: ApplicationHandlerContext):
     asyncio.get_running_loop().set_debug(True)
     logging.basicConfig(level=logging.DEBUG)
     asyncio.get_running_loop().slow_callback_duration = 0.01
-
-
-def format_dict_message(details: dict[str, tuple[str, bool]]) -> str:
-    return "\n".join(f"<u><b>{k}</b></u>: {v}" for (k, (v, show)) in details.items() if show)
-
-
-class TreeMessage(metaclass=GADT):
-    Text: Callable[[str], TreeMessage]
-    InlineCode: Callable[[str], TreeMessage]
-    Sequence: Callable[[list[TreeMessage]], TreeMessage]
-    Named: Callable[[str, TreeMessage], TreeMessage]
-    Skip: TreeMessage
-
-    @property
-    def sequence_nesting_depth(self) -> int:
-        match self:
-            case TreeMessage.Sequence(sequence):
-                return 1 + max((sub.sequence_nesting_depth for sub in sequence), default=0)
-            case _:
-                return 0
-
-    def __str__(self) -> str:
-        indent = " " * 4
-
-        match self:
-            case TreeMessage.Skip:
-                return ""
-            case TreeMessage.Text(text):
-                return text
-            case TreeMessage.InlineCode(text):
-                return f"<code>{text}</code>"
-            case TreeMessage.Sequence(sequence):
-                return (
-                    ("\n" * self.sequence_nesting_depth).join(str(sub) for sub in sequence if sub != TreeMessage.Skip)
-                )
-            case TreeMessage.Named(key, TreeMessage.Sequence(_) as value):
-                return f"<u>{key}</u>:\n{indent}{str(value).replace('\n', '\n' + indent)}"
-            case TreeMessage.Named(key, value):
-                return f"<u>{key}</u>: {value}"
 
 
 def format_add_video_status(video: YouTube, user: User | None, postprocessing: AudioProcessingSettings | None,
@@ -192,8 +153,33 @@ def format_get_queue(queue: AudioQueue) -> TreeMessage:
     ])
 
 
-@bot_config.add_command_handler(["q", "queue", "queued"], filters=~filters.UpdateType.EDITED_MESSAGE, has_args=False)
+@bot_config.add_command_handler(
+    ["help"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    has_args=False,
+    permissions=UserSelector.Or(
+        UserSelector.ChatTypeIsIn(ChatTypeFlag.DM),
+        UserSelector.MembershipStatusIsIn(MembershipStatusFlag.ADMINISTRATOR | MembershipStatusFlag.OWNER)
+    )
+)
+async def get_help(context: UpdateHandlerContext):
+    """Show this help message
+    (Only available in DMs to reduce clutter)"""
+    query_message_id: int = context.update.message.message_id
+
+    await context.send_message(
+        str(await bot_config.get_help(context)),
+        parse_mode=ParseMode.HTML,
+        reply_to_message_id=query_message_id)
+
+
+@bot_config.add_command_handler(
+    ["q", "queue", "queued"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    has_args=False
+)
 async def get_queue(context: UpdateHandlerContext):
+    """Show the queue"""
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
     await context.send_message(
@@ -283,7 +269,7 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int):
                         return
                     postprocessing.percussive_harmonic_balance = -balance
                 case ["nightcore" | "night-core" | "sped up" | "sped-up"]:
-                    postprocessing.pitch_shift = 12 * 0.35
+                    postprocessing.pitch_shift = 12 * log(1.35) / log(2)
                     postprocessing.tempo_scale = 1.35
                 case ["echo", strength_str]:
                     strength: float | None = await parse_float(strength_str, context, query_message_id)
@@ -377,6 +363,19 @@ async def queue_playlist(context: UpdateHandlerContext, playlist: Playlist, user
     permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
 )
 async def enqueue(context: UpdateHandlerContext):
+    """Add a song to the queue
+    At present, you can pass this command a:
+    - YouTube video link
+    - YouTube Music song link
+    - YouTube or YouTube Music playlist link (wip — may break because of Telegram api issues)
+    - Search term for a YouTube video
+    Optionally, you can also pass some audio pre-processing instructions:
+    - "pitch shift" / "pitch adjust" / "freq shift" / etc.: shift the play-back pitch by a number of semitones
+    - "speed" / "time contract" / "tempo" / etc.: scale the play-back tempo
+    - "nightcore" ≈ (pitch shift: 5.12, speed: 1.35)
+    Pass the post-processing instructions individually, surrounded by braces, before the link / search term.
+    For example: <code>/q {speed: 1.5} {pitch shift: 2} microchip song</code>
+    """
     user: User = context.update.effective_user
     query_message_id: int = context.update.message.message_id
 
@@ -413,31 +412,37 @@ async def callback_query_handler(context: UpdateHandlerContext):
 @bot_config.add_command_handler(
     ["pause", "stop"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
+    has_args=False,
     permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
 )
 async def pause(context: UpdateHandlerContext):
+    """Pause playback"""
     query_message: Message = context.update.message
-    result: bool = await context.run_data.queue.pause()
-    await query_message.set_reaction("👍" if result else "🤷")
+    await context.run_data.queue.pause()
+    await query_message.set_reaction("👍")
 
 
 @bot_config.add_command_handler(
     ["play", "resume", "unpause"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
+    has_args=False,
     permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
 )
-async def play(context: UpdateHandlerContext):
+async def resume(context: UpdateHandlerContext):
+    """Resume (unpause) playback"""
     query_message: Message = context.update.message
-    result: bool = context.run_data.queue.unpause()
-    await query_message.set_reaction("👍" if result else "🤷")
+    await context.run_data.queue.resume()
+    await query_message.set_reaction("👍")
 
 
 @bot_config.add_command_handler(
     "skip",
     filters=~filters.UpdateType.EDITED_MESSAGE,
+    has_args=False,
     permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
 )
 async def skip(context: UpdateHandlerContext):
+    """Skip the currently playing (or paused) song"""
     query_message: Message = context.update.message
     user: User = context.update.effective_user
     result: bool = await context.run_data.queue.skip(user.name)
@@ -447,9 +452,11 @@ async def skip(context: UpdateHandlerContext):
 @bot_config.add_command_handler(
     ["skip_all", "clear", "skipall"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
+    has_args=False,
     permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
 )
 async def skip_all(context: UpdateHandlerContext):
+    """Skip all songs currently playing or in the queue"""
     query_message: Message = context.update.message
     user: User = context.update.effective_user
     await context.run_data.queue.skip_all(user.name)
@@ -463,6 +470,12 @@ async def skip_all(context: UpdateHandlerContext):
     permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
 )
 async def set_volume(context: UpdateHandlerContext):
+    """Set the (digital) output volume (in percent)
+    The volume should normally remain between 0 (silent) and 100 (the maximum "reasonable" volume).
+    In some cases, depending on the current configuration, the volume can be set above 100%.
+    Please do not set the volume above 100% without <i>very</i> good reason.
+    """
+
     query_message: Message = context.update.message
     try:
         new_volume: float = float(context.args[0])
@@ -486,6 +499,8 @@ async def set_volume(context: UpdateHandlerContext):
     has_args=False
 )
 async def get_volume(context: UpdateHandlerContext):
+    """Get the current (digital) output volume (in percent)"""
+
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
     await context.send_message(
@@ -530,6 +545,7 @@ async def get_volume(context: UpdateHandlerContext):
     filters=~filters.UpdateType.EDITED_MESSAGE
 )
 async def wee(context: UpdateHandlerContext):
+    """WEE"""
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
     await context.send_message(
@@ -543,6 +559,7 @@ async def wee(context: UpdateHandlerContext):
     filters=~filters.UpdateType.EDITED_MESSAGE
 )
 async def hoo(context: UpdateHandlerContext):
+    """HOO"""
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
     await context.send_message(

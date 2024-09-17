@@ -13,6 +13,5 @@ source ./.venv/bin/activate
 
 pip install --upgrade pip
 pip install --upgrade certifi
-pip install "python-telegram-bot[all]" pytubefix pydub py-applescript numpy librosa python-vlc
-pip install git+https://github.com/cexen/py-simple-audio.git
+pip install "python-telegram-bot[all]" pytubefix python-vlc
 brew install ffmpeg

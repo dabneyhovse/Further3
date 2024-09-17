@@ -173,7 +173,6 @@ class AudioQueue(Iterable[AudioQueueElement]):
         self.player.set_pause(True)
 
     async def resume(self) -> None:
-
         self.player.set_pause(False)
 
     async def set_digital_volume(self, volume: float) -> bool:
