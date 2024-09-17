@@ -166,4 +166,4 @@ def trim_docstring(docstring) -> str:
     while trimmed and not trimmed[0]:
         trimmed.pop(0)
     # Return a single string:
-    return '\n'.join(trimmed)
+    return "\n".join(trimmed).rstrip()

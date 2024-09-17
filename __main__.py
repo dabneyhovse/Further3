@@ -545,11 +545,11 @@ async def get_volume(context: UpdateHandlerContext):
     filters=~filters.UpdateType.EDITED_MESSAGE
 )
 async def wee(context: UpdateHandlerContext):
-    """WEE"""
+    """HOO"""
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
     await context.send_message(
-        f"hoo",
+        f"/hoo",
         parse_mode=ParseMode.HTML,
         reply_to_message_id=query_message_id)
 
@@ -559,11 +559,11 @@ async def wee(context: UpdateHandlerContext):
     filters=~filters.UpdateType.EDITED_MESSAGE
 )
 async def hoo(context: UpdateHandlerContext):
-    """HOO"""
+    """WEE"""
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
     await context.send_message(
-        f"wee",
+        f"/wee",
         parse_mode=ParseMode.HTML,
         reply_to_message_id=query_message_id)
 
