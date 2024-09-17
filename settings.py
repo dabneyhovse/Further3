@@ -8,6 +8,8 @@ class Settings:
     debug: bool = False
 
     registered_chat_ids: list[int] = []
+    owner_id: int
+    comptroller_ids: list[int] = []
 
     async_sleep_refresh_rate: float = 0.25
 

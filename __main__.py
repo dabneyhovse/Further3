@@ -5,6 +5,7 @@ import datetime
 import logging
 from asyncio import Future
 from math import log
+from time import time
 from typing import cast
 
 from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
@@ -541,6 +542,63 @@ async def get_volume(context: UpdateHandlerContext):
 
 
 @bot_config.add_command_handler(
+    "complain",
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    permissions=UserSelector.And(
+        UserSelector.ChatIDIsIn(Settings.registered_chat_ids),
+        UserSelector.Not(
+            UserSelector.MembershipStatusIsIn(
+                MembershipStatusFlag.RESTRICTED | MembershipStatusFlag.NONMEMBER | MembershipStatusFlag.LEFT
+            )
+        )
+    ),
+    has_args=False
+)
+async def complain(context: UpdateHandlerContext):
+    """Ping me and the comptrollers about an issue
+    <i><b>Please, I'm begging you, please don't spam or abuse this.</b></i>
+    This command will ring my phone loudly and persistently enough to wake the dead.
+    If I don't respond, it is probably because I am busy, not because I haven't seen this.
+    """
+
+    query_message: Message = context.update.message
+    query_message_id = query_message.message_id
+
+    context.bot_data.defaults.last_complaint_time = 0
+    last_complaint_time: float = context.bot_data.last_complaint_time
+    if time() - last_complaint_time > 60 * 5:
+        for comptroller_id in Settings.comptroller_ids:
+            await context.bot.send_message(
+                chat_id=comptroller_id,
+                text=f"A darb is reporting an issue / requesting assistance via the Further bot: {query_message.link}"
+            )
+        await context.bot.send_message(
+            chat_id=Settings.owner_id,
+            text=f"bc33b6204cedf60452a886fa8715e7e6acacc06ebc28a6c8eda0b3c869001d0c\n"
+                 f"Complaint sent to Further bot: {query_message.link}"
+        )
+        context.bot_data.last_complaint_time = time()
+        await context.send_message(
+            "The comptrollers and I have been notified, and I will respond shortly if I'm not busy. "
+            "This command rings my phone loudly and persistently enough to wake the dead, so if I don't respond, "
+            "it is probably because I am busy, not because I haven't seen this.\n"
+            "<u><i><b>Please, I'm begging you, please don't spam or abuse this command.</b></i></u>",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id
+        )
+    else:
+        await context.send_message(
+            "<u><i><b>Please stop spamming this.\n</b></i></u>"
+            "I have already been notified and will respond shortly if I'm not busy. "
+            "This command rings my phone loudly and persistently enough to wake the dead, so if I don't respond, "
+            "it is probably because I am busy, not because I haven't seen this.\n"
+            "<u><i><b>Please, I'm begging you, please don't spam or abuse command.</b></i></u>",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id
+        )
+
+
+@bot_config.add_command_handler(
     "wee",
     filters=~filters.UpdateType.EDITED_MESSAGE
 )
@@ -566,6 +624,29 @@ async def hoo(context: UpdateHandlerContext):
         f"/wee",
         parse_mode=ParseMode.HTML,
         reply_to_message_id=query_message_id)
+
+
+@bot_config.add_command_handler(
+    "test_ping",
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    user_selector_filter=UserSelector.MembershipStatusIsIn(
+        MembershipStatusFlag.ADMINISTRATOR | MembershipStatusFlag.OWNER
+    ),
+    hide_from_help=True
+)
+async def test_ping(context: UpdateHandlerContext):
+    query_message: Message = context.update.message
+    query_message_id = query_message.message_id
+    user: User = context.update.effective_user
+    print(
+        f"Test ping received.\n"
+        f"Message ID: {query_message_id}\n"
+        f"Username: {user.username}\n"
+        f"User ID: {user.id}\n"
+        f"Chat name: {context.chat.effective_name}\n"
+        f"Chat ID: {context.chat.id}\n\n"
+    )
+    await query_message.delete()
 
 
 bot_config.build()

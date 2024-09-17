@@ -108,17 +108,19 @@ class BotConfig:
     )
     def add_command_handler(self, f, name: str | Collection[str] | None = None, filters: BaseFilter | None = None,
                             has_args: bool | int | None = None, blocking: bool = False,
-                            permissions: UserSelector | None = None, user_selector_filter: UserSelector | None = None):
+                            permissions: UserSelector | None = None, user_selector_filter: UserSelector | None = None,
+                            hide_from_help: bool = False):
         if name is None:
             name = f.__name__
 
-        self.help_messages.append(HelpMessage(
-            name=name,
-            has_args=has_args,
-            permissions=permissions,
-            user_selector_filter=user_selector_filter,
-            docstring=trim_docstring(f.__doc__)
-        ))
+        if not hide_from_help:
+            self.help_messages.append(HelpMessage(
+                name=name,
+                has_args=has_args,
+                permissions=permissions,
+                user_selector_filter=user_selector_filter,
+                docstring=trim_docstring(f.__doc__)
+            ))
 
         self.handlers.append(CommandHandler(name, f, filters=filters, has_args=has_args, block=blocking))
 
