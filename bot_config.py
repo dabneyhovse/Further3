@@ -13,6 +13,7 @@ from telegram.ext.filters import BaseFilter
 
 from decorator_tools import arg_decorator, method_decorator, map_first_arg_decorator, map_all_args_decorator, \
     map_all_to_first_arg_decorator
+from flood_control_protection import protect_from_telegram_flood_control, protect_from_telegram_timeout
 from formatted_text import FormattedText
 from funcs import compose
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
@@ -58,7 +59,7 @@ def guard_permissions(f, *_args, permissions: UserSelector | None = None,
 
 
 class BotConfig:
-    def __init__(self, bot_token_path: str, persistence_file: str | None, resource_dir: str | None,
+    def __init__(self, bot_token_path: str, persistence_file: str | None, resource_dir: str | None = None,
                  default_permissions: UserSelector | None = None) -> None:
         logging.basicConfig(
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -75,7 +76,7 @@ class BotConfig:
         self.persistence_file: None | str = persistence_file
 
         self.resource_dir: None | str = resource_dir
-        if resource_dir:
+        if resource_dir is not None:
             self.resource_handler: ResourceHandler = ResourceHandler(resource_dir)
 
         self.default_permissions: UserSelector = \
@@ -143,7 +144,7 @@ class BotConfig:
          .post_init(self.post_init_handler)
          .arbitrary_callback_data(True))
         if self.persistence_file is not None:
-            builder.persistence(PicklePersistence(filepath="store/persistence_store"))
+            builder.persistence(PicklePersistence(filepath="store/further_persistence_store"))
         application = builder.build()
 
         application.add_handlers(self.handlers)
@@ -158,6 +159,8 @@ class BotConfig:
         )
 
 
+@protect_from_telegram_timeout
+@protect_from_telegram_flood_control
 async def edit_message_text(message: Message, text: str | FormattedText, **kwargs):
     if isinstance(text, str):
         text: FormattedText = FormattedText(text)

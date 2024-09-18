@@ -1,4 +1,4 @@
-from asyncio import sleep, get_event_loop, Future, CancelledError, Task, to_thread
+from asyncio import sleep, get_event_loop, Future, CancelledError, Task, to_thread, TaskGroup
 from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -11,6 +11,7 @@ from vlc import State as VLCState
 from async_queue import AsyncQueue
 from audio_processing import AudioProcessingSettings, ffmpeg_pitch_shift
 from pytubefix import YouTube, Stream
+from quiet_hours import is_quiet_hours
 from resource_handler import ResourceHandler
 from settings import Settings
 
@@ -125,7 +126,13 @@ class AudioQueue(Iterable[AudioQueueElement]):
                 path: str = await element.path
                 if path is None:
                     assert element.skipped
+                    self.current = None
                     continue
+
+                if is_quiet_hours():
+                    await self.skip_all("@GoToBedFroshDitchDayIsTomorrow (quiet hours)")
+                    continue
+
                 media: Media = self.instance.media_new_path(path)
                 self.player.set_media(media)
 
@@ -136,9 +143,13 @@ class AudioQueue(Iterable[AudioQueueElement]):
                 self.player.play()
                 element.active = True
 
-                while self.player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not element.skipped:
-                    # TODO: Wait for the duration or skip (whichever first)
+                while self.player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not element.skipped and \
+                        not is_quiet_hours():
+                    # TODO: Wait for the duration or skip or quiet hours (whichever first)
                     await sleep(Settings.async_sleep_refresh_rate)
+
+                if is_quiet_hours():
+                    await self.skip_all("@GoToBedFroshDitchDayIsTomorrow (quiet hours)")
 
                 if self.player.get_state() not in (VLCState.Ended, VLCState.Stopped):
                     self.player.stop()
@@ -156,9 +167,10 @@ class AudioQueue(Iterable[AudioQueueElement]):
     async def skip_all(self, username: str) -> bool:
         if self.state == AudioQueue.State.EMPTY:
             return False
-        for element in self.queue.reverse_destructive_iter:
-            await element.skip(username)
-        await self.current.skip(username)
+        async with TaskGroup() as skip_tasks:
+            for element in self.queue.reverse_destructive_iter:
+                skip_tasks.create_task(element.skip(username))
+            skip_tasks.create_task(self.current.skip(username))
 
     async def skip_specific(self, username: str, id: int) -> bool:
         if self.current is not None and self.current.id == id:
@@ -193,7 +205,7 @@ class AudioQueue(Iterable[AudioQueueElement]):
 
     @property
     def state(self) -> State:
-        match (self.player.get_state(), bool(self.queue), self.current is not None):
+        match (self.player.get_state(), bool(self.queue), self.current is not None and not self.current.skipped):
             case (VLCState.Playing, _, True):
                 return AudioQueue.State.PLAYING
             case (VLCState.Paused, _, True):
@@ -214,7 +226,8 @@ class AudioQueue(Iterable[AudioQueueElement]):
                       f"\tbool(self.queue): {queue_nonempty}\n"
                       f"\tself.current is not None: {current_set}"
                       f"\tself.queue: {self.queue}"
-                      f"\tself.current: {self.current}")
+                      f"\tself.current: {self.current}"
+                      f"\tself.current.skipped: {self.current.skipped}")
                 return AudioQueue.State.UNKNOWN_ERROR
 
     def get_id(self) -> int:

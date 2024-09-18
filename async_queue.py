@@ -32,13 +32,17 @@ class AsyncQueue[T](Iterable[T]):
 
         def __next__(self) -> T:
             if self.source._queue:
-                return self.source._queue.pop() if self.reverse else self.source._queue.popleft()
+                out: T = self.source._queue.pop() if self.reverse else self.source._queue.popleft()
+                if not self.source._queue:
+                    self.source._non_empty_event.clear()
+                return out
             else:
                 raise StopIteration
 
     def __init__(self):
         self._queue = deque()
         self._iterator_lock = Lock()
+        self.read_lock = Lock()
         self._async_iterator = AsyncQueue.AsyncIterator(self)
         self._destructive_iterator = AsyncQueue.DestructiveIterator(self)
         self._reverse_destructive_iterator = AsyncQueue.DestructiveIterator(self, reverse=True)
@@ -53,7 +57,7 @@ class AsyncQueue[T](Iterable[T]):
 
     @property
     def reverse_destructive_iter(self):
-        return self._destructive_iterator
+        return self._reverse_destructive_iterator
 
     @asynccontextmanager
     async def async_iter(self):
@@ -76,16 +80,18 @@ class AsyncQueue[T](Iterable[T]):
         self._non_empty_event.set()
 
     async def pop(self) -> T:
-        out: T = self._queue.pop()
-        if not self._queue:
-            self._non_empty_event.clear()
-        return out
+        async with self.read_lock:
+            out: T = self._queue.pop()
+            if not self._queue:
+                self._non_empty_event.clear()
+            return out
 
     async def popleft(self) -> T:
-        out: T = self._queue.popleft()
-        if not self._queue:
-            self._non_empty_event.clear()
-        return out
+        async with self.read_lock:
+            out: T = self._queue.popleft()
+            if not self._queue:
+                self._non_empty_event.clear()
+            return out
 
     def __bool__(self) -> bool:
         return bool(self._queue)

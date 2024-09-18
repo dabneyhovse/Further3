@@ -5,6 +5,7 @@ from telegram import Update, Message, Bot, User, Chat, ChatMember
 from telegram.ext import Application, ContextTypes, CallbackContext
 
 from attr_dict import AttrDictView
+from flood_control_protection import protect_from_telegram_flood_control, protect_from_telegram_timeout
 from formatted_text import FormattedText
 
 
@@ -45,6 +46,8 @@ class UpdateHandlerContext(HandlerContext):
         self.update: Update = update
         self.context: CallbackContext = context
 
+    @protect_from_telegram_timeout
+    @protect_from_telegram_flood_control
     async def send_message(self, text: str | FormattedText, chat_id: Optional[int] = None, **kwargs) -> Message:
         if isinstance(text, str):
             text: FormattedText = FormattedText(text)
