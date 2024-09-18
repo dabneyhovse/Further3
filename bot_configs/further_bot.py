@@ -5,7 +5,6 @@ import logging
 from asyncio import Future
 from datetime import datetime, timedelta
 from math import log
-from time import time
 from typing import cast
 
 from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
@@ -26,12 +25,12 @@ from tree_message import TreeMessage
 from user_selector import UserSelector, ChatTypeFlag, MembershipStatusFlag
 from util import count_iterable
 
-BOT_TOKEN_FILE = "../sensitive/further_bot_token.txt"
+BOT_TOKEN_FILE = "sensitive/further_bot_token.txt"
 
 bot_config = BotConfig(
     BOT_TOKEN_FILE,
-    persistence_file="../store/further_persistence_store",
-    resource_dir="../downloads"
+    persistence_file="store/further_persistence_store",
+    resource_dir="downloads"
 )
 
 
@@ -42,11 +41,12 @@ async def post_init(context: ApplicationHandlerContext):
     await context.run_data.queue.set_clamped_digital_volume(context.bot_data.digital_volume)
 
     debugging.listen()
+    await bot_config.start_connection_listener()
 
     # TODO: Remove when unneeded
     asyncio.get_running_loop().set_debug(True)
     logging.basicConfig(level=logging.DEBUG)
-    asyncio.get_running_loop().slow_callback_duration = 0.01
+    asyncio.get_running_loop().slow_callback_duration = 0.050
 
 
 def format_add_video_status(video: YouTube, user: User | None, postprocessing: AudioProcessingSettings | None,
@@ -134,7 +134,7 @@ def format_get_queue(queue: AudioQueue) -> TreeMessage:
 
 
 @bot_config.add_command_handler(
-    ["help"],
+    ["help", "further_help"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
     has_args=False,
     permissions=UserSelector.Or(
@@ -340,7 +340,7 @@ async def queue_playlist(context: UpdateHandlerContext, playlist: Playlist, user
     ["q", "queue", "add", "enqueue"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
     has_args=True,
-    permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+    permissions=UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
 )
 async def enqueue(context: UpdateHandlerContext):
     """Add a song to the queue
@@ -393,7 +393,7 @@ async def callback_query_handler(context: UpdateHandlerContext):
     ["pause", "stop"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
     has_args=False,
-    permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+    permissions=UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
 )
 async def pause(context: UpdateHandlerContext):
     """Pause playback"""
@@ -406,7 +406,7 @@ async def pause(context: UpdateHandlerContext):
     ["play", "resume", "unpause"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
     has_args=False,
-    permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+    permissions=UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
 )
 async def resume(context: UpdateHandlerContext):
     """Resume (unpause) playback"""
@@ -419,7 +419,7 @@ async def resume(context: UpdateHandlerContext):
     "skip",
     filters=~filters.UpdateType.EDITED_MESSAGE,
     has_args=False,
-    permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+    permissions=UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
 )
 async def skip(context: UpdateHandlerContext):
     """Skip the currently playing (or paused) song"""
@@ -433,7 +433,7 @@ async def skip(context: UpdateHandlerContext):
     ["skip_all", "clear", "skipall"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
     has_args=False,
-    permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+    permissions=UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
 )
 async def skip_all(context: UpdateHandlerContext):
     """Skip all songs currently playing or in the queue"""
@@ -447,7 +447,7 @@ async def skip_all(context: UpdateHandlerContext):
     ["volume", "vol", "v"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
     has_args=1,
-    permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
+    permissions=UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
 )
 async def set_volume(context: UpdateHandlerContext):
     """Set the (digital) output volume (in percent)
@@ -521,63 +521,6 @@ async def get_volume(context: UpdateHandlerContext):
 
 
 @bot_config.add_command_handler(
-    "complain",
-    filters=~filters.UpdateType.EDITED_MESSAGE,
-    permissions=UserSelector.And(
-        UserSelector.ChatIDIsIn(Settings.registered_chat_ids),
-        UserSelector.Not(
-            UserSelector.MembershipStatusIsIn(
-                MembershipStatusFlag.RESTRICTED | MembershipStatusFlag.NONMEMBER | MembershipStatusFlag.LEFT
-            )
-        )
-    ),
-    has_args=False
-)
-async def complain(context: UpdateHandlerContext):
-    """Ping me and the comptrollers about an issue
-    <i><b>Please, I'm begging you, please don't spam or abuse this.</b></i>
-    This command will ring my phone loudly and persistently enough to wake the dead.
-    If I don't respond, it is probably because I am busy, not because I haven't seen this.
-    """
-
-    query_message: Message = context.update.message
-    query_message_id = query_message.message_id
-
-    context.bot_data.defaults.last_complaint_time = 0
-    last_complaint_time: float = context.bot_data.last_complaint_time
-    if time() - last_complaint_time > 60 * 5:
-        for comptroller_id in Settings.comptroller_ids:
-            await context.bot.send_message(
-                chat_id=comptroller_id,
-                text=f"A darb is reporting an issue / requesting assistance via the Further bot: {query_message.link}"
-            )
-        await context.bot.send_message(
-            chat_id=Settings.owner_id,
-            text=f"bc33b6204cedf60452a886fa8715e7e6acacc06ebc28a6c8eda0b3c869001d0c\n"
-                 f"Complaint sent to Further bot: {query_message.link}"
-        )
-        context.bot_data.last_complaint_time = time()
-        await context.send_message(
-            "The comptrollers and I have been notified, and I will respond shortly if I'm not busy. "
-            "This command rings my phone loudly and persistently enough to wake the dead, so if I don't respond, "
-            "it is probably because I am busy, not because I haven't seen this.\n"
-            "<u><i><b>Please, I'm begging you, please don't spam or abuse this command.</b></i></u>",
-            parse_mode=ParseMode.HTML,
-            reply_to_message_id=query_message_id
-        )
-    else:
-        await context.send_message(
-            "<u><i><b>Please stop spamming this.\n</b></i></u>"
-            "I have already been notified and will respond shortly if I'm not busy. "
-            "This command rings my phone loudly and persistently enough to wake the dead, so if I don't respond, "
-            "it is probably because I am busy, not because I haven't seen this.\n"
-            "<u><i><b>Please, I'm begging you, please don't spam or abuse command.</b></i></u>",
-            parse_mode=ParseMode.HTML,
-            reply_to_message_id=query_message_id
-        )
-
-
-@bot_config.add_command_handler(
     "wee",
     filters=~filters.UpdateType.EDITED_MESSAGE
 )
@@ -645,6 +588,3 @@ async def test_set_quiet_hours(context: UpdateHandlerContext):
     now: datetime = datetime.now()
     Settings.normal_quiet_hours_start_time = now.hour + (now.minute + float(context.args[0])) / 60 + now.second / 3600
     await query_message.delete()
-
-
-bot_config.build()

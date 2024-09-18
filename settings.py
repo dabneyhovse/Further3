@@ -8,7 +8,7 @@ class Settings:
     debug: bool = False
 
     # User and chat registration
-    registered_chat_ids: list[int] = []
+    registered_primary_chat_id: int
     owner_id: int
     comptroller_ids: list[int] = []
 

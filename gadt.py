@@ -6,6 +6,8 @@ from collections.abc import _CallableGenericAlias as CollectionsABCCallableGener
 from types import GenericAlias as TypesGenericAlias
 from typing import Callable as TypingCallable, Any, Self, get_args, TypeVar
 
+from pycparser.c_ast import Compound
+
 type _CompoundConstrType = TypesGenericAlias | CollectionsABCCallableGenericAlias
 type ConstrType = GADT | _CompoundConstrType
 
@@ -27,6 +29,10 @@ def _gadt_eq(self, other):
             self.__construction_data__ == other.__construction_data__)
 
 
+def _gadt_reduce(self):
+    return self.__origin__.__reconstruct__, (self.__constr_name__, self.__construction_data__)
+
+
 type Constructor = GADT | CompoundConstructor
 
 
@@ -39,7 +45,8 @@ class GADT(type):
         }  # Defaults
         updated_namespace.update(namespace)
         updated_namespace.update({
-            "__init__": _gadt_init
+            "__init__": _gadt_init,
+            "__reduce__": _gadt_reduce
         })  # Overrides
         new_annotations = {
             "__constr_name__": str,
@@ -111,6 +118,12 @@ class GADT(type):
                 else:
                     raise type_error
 
+    def __reconstruct__(cls, constr_name: str, data: tuple[Any, ...] | None) -> Self:
+        if data is None:
+            return getattr(cls, constr_name)
+        else:
+            return getattr(cls, constr_name)(*data)
+
 
 class CompoundConstructor(GADT):
     @staticmethod
@@ -120,7 +133,7 @@ class CompoundConstructor(GADT):
             case (_, (_, (arg_types, result_type))):
                 def __new__(cls, *_data):
                     obj = object.__new__(cls)
-                    obj.__constr__ = type(cls)
+                    obj.__constr__ = cls
                     return obj
 
                 def __init__(self, *data):

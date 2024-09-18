@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import logging
 import re
+from asyncio import create_task, get_running_loop
 from collections.abc import Collection, Callable
 from functools import wraps, cached_property
 
 from telegram import Message, User, Bot, Chat
 from telegram.constants import ParseMode
 from telegram.ext import MessageHandler, ApplicationBuilder, CommandHandler, BaseHandler, PicklePersistence, \
-    CallbackQueryHandler
+    CallbackQueryHandler, Application
 from telegram.ext.filters import BaseFilter
 
+from bot_communication import DownwardsCommunication, ConnectionListener
 from decorator_tools import arg_decorator, method_decorator, map_first_arg_decorator, map_all_args_decorator, \
     map_all_to_first_arg_decorator
 from flood_control_protection import protect_from_telegram_flood_control, protect_from_telegram_timeout
@@ -87,6 +89,9 @@ class BotConfig:
             level=logging.INFO
         )
 
+        self.application: Application | None = None
+        self.connection_listener: ConnectionListener | None = None
+
         self.handlers: list[BaseHandler] = []
         self.post_init_handler = None
 
@@ -137,7 +142,9 @@ class BotConfig:
             pattern = None
         self.handlers.append(CallbackQueryHandler(f, pattern=pattern))
 
-    def build(self):
+    def build(self, connection_listener: ConnectionListener | None = None) -> None:
+        self.connection_listener = connection_listener
+
         builder = ApplicationBuilder()
         (builder
          .token(self.bot_token)
@@ -145,18 +152,37 @@ class BotConfig:
          .arbitrary_callback_data(True))
         if self.persistence_file is not None:
             builder.persistence(PicklePersistence(filepath="store/further_persistence_store"))
-        application = builder.build()
+        self.application = builder.build()
 
-        application.add_handlers(self.handlers)
+        self.application.add_handlers(self.handlers)
 
-        application.bot_config = self
+        self.application.bot_config = self
 
-        application.run_polling()
+        self.application.run_polling()
 
     async def get_help(self, context: UpdateHandlerContext) -> FormattedText:
         return FormattedText(
             str(TreeMessage.Sequence([await message.display(context) for message in self.help_messages]))
         )
+
+    async def start_connection_listener(self):
+        if self.connection_listener is not None:
+            create_task(self.connection_listener.listen(self.process_communication))
+        else:
+            raise ValueError("No ConnectionListener configured")
+
+    async def process_communication(self, communication: DownwardsCommunication):
+        match communication:
+            case DownwardsCommunication.ShutDown(0):
+                await self.application.stop()
+                await self.application.updater.stop()
+                await self.application.shutdown()
+                try:
+                    get_running_loop().stop()
+                except RuntimeError:
+                    pass
+            case DownwardsCommunication.ShutDown(1):
+                raise SystemExit()
 
 
 @protect_from_telegram_timeout
