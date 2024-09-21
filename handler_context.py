@@ -2,7 +2,7 @@ from abc import abstractmethod, ABC
 from typing import Optional
 
 from telegram import Update, Message, Bot, User, Chat, ChatMember
-from telegram.ext import Application, ContextTypes, CallbackContext
+from telegram.ext import CallbackContext, Application
 
 from attr_dict import AttrDictView
 from flood_control_protection import protect_from_telegram_flood_control, protect_from_telegram_timeout
@@ -20,8 +20,7 @@ class HandlerContext(ABC):
 
     @property
     def chat_data(self):
-        return AttrDictView(self.application.bot_data)
-        # return AttrDictView(self.application.chat_data["data"])
+        return AttrDictView(self.application.chat_data["data"])
 
     @property
     def user_data(self):
@@ -47,15 +46,16 @@ class UpdateHandlerContext(HandlerContext):
         self.context: CallbackContext = context
 
     @protect_from_telegram_timeout
-    @protect_from_telegram_flood_control
     async def send_message(self, text: str | FormattedText, chat_id: Optional[int] = None, **kwargs) -> Message:
-        if isinstance(text, str):
-            text: FormattedText = FormattedText(text)
-        if chat_id is None:
-            chat_id = self.update.effective_chat.id
-        from bot_config import break_message_text
-        message_text: FormattedText = break_message_text(text)
-        return await self.context.bot.send_message(chat_id=chat_id, text=str(message_text), **kwargs)
+        @protect_from_telegram_flood_control(self.application.bot_config.connection_listener)
+        async def wrapped() -> Message:
+            chat_id_value = chat_id if chat_id is not None else self.update.message.chat_id
+            message_text: FormattedText = (
+                text if isinstance(text, FormattedText) else FormattedText(text)
+            ).break_message_text()
+            return await self.context.bot.send_message(chat_id=chat_id_value, text=str(message_text), **kwargs)
+
+        return await wrapped()
 
     @property
     def application(self) -> Application:

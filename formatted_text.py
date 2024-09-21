@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABCMeta
 from collections.abc import Generator, Iterable, Iterator, Reversible
 from enum import IntFlag, EnumMeta
@@ -110,3 +112,10 @@ class FormattedText(list[tuple[str, Format]]):
 
     def __add__(self, other: Self) -> Self:
         return FormattedText(super().__add__(other))
+
+    def break_message_text(self) -> FormattedText:
+        max_len: int = 4096
+        if len(self) > max_len:
+            return self[:max_len - 3] + FormattedText("...")
+        else:
+            return self

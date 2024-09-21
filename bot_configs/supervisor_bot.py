@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import traceback
-from asyncio import create_task
+from asyncio import create_task, get_running_loop, sleep
 from multiprocessing import Process, Pipe
-from multiprocessing.connection import Connection
+from multiprocessing.connection import Connection  # noqa
 from sys import stderr
 from time import time
 
@@ -13,6 +13,7 @@ from telegram.ext import filters
 
 from bot_communication import ConnectionListener, DownwardsCommunication, UpwardsCommunication
 from bot_config import BotConfig
+from debugging import intercept
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
 from settings import Settings
 from user_selector import UserSelector, MembershipStatusFlag, ChatTypeFlag
@@ -30,6 +31,8 @@ async def post_init(context: ApplicationHandlerContext):
     context.run_data.defaults.further_process = None
     context.run_data.defaults.further_connection = None
     context.run_data.defaults.further_connection_listener = None
+    context.run_data.defaults.flood_control_completion_time = 0
+    context.run_data.defaults.flood_control_message = None
 
 
 @bot_config.add_command_handler(
@@ -149,18 +152,33 @@ async def further_bot_communications_handler(communication: UpwardsCommunication
                 text="Managed exception Further Bot shutdown detected"
             )
             print(traceback.format_exception(e), file=stderr)
-        case UpwardsCommunication.FloodControlIssues:
-            await bot.send_message(
-                chat_id=Settings.registered_primary_chat_id,
-                text="Telegram flood control issues detected - long delays are expected"
-            )
+        case UpwardsCommunication.FloodControlIssues(delay):
+            resume_time = time() + delay
+            if bot_config.run_data.flood_control_message is None:
+                bot_config.run_data.flood_control_message = await bot.send_message(
+                    chat_id=Settings.registered_primary_chat_id,
+                    text="Telegram flood control throttling detected - expected long delays"
+                )
+                get_running_loop().call_later(delay, clear_flood_control_message_callback)
+            elif resume_time > bot_config.run_data.flood_control_completion_time:
+                bot_config.run_data.flood_control_completion_time = resume_time
+
+
+async def clear_flood_control_message_callback():
+    while bot_config.run_data.flood_control_message is not None and \
+            time() >= bot_config.run_data.flood_control_completion_time:
+        await sleep(time() - bot_config.run_data.flood_control_completion_time + Settings.async_sleep_refresh_rate)
+    if bot_config.run_data.flood_control_message is not None:
+        await bot_config.run_data.flood_control_message.delete()
+        bot_config.run_data.flood_control_message = None
 
 
 @bot_config.add_command_handler(
     "start_further",
     filters=~filters.UpdateType.EDITED_MESSAGE,
-    permissions=UserSelector.MembershipStatusIsIn(
-        MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR
+    permissions=UserSelector.And(
+        UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR),
+        UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
     ),
     has_args=False,
     blocking=True
@@ -189,7 +207,7 @@ async def start_further(context: UpdateHandlerContext):
             daemon=True
         )
         context.run_data.further_connection_listener = ConnectionListener(context.run_data.further_connection)
-        create_task(context.run_data.further_connection_listener.listen(further_bot_communications_handler))
+        create_task(context.run_data.further_connection_listener.listen(further_bot_communications_handler))  # noqa
 
     context.run_data.further_process.start()
 
@@ -199,8 +217,9 @@ async def start_further(context: UpdateHandlerContext):
 @bot_config.add_command_handler(
     ["stop_further", "shutdown_further"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
-    permissions=UserSelector.MembershipStatusIsIn(
-        MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR
+    permissions=UserSelector.And(
+        UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR),
+        UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
     ),
     has_args=1,
     blocking=True
@@ -227,3 +246,29 @@ async def stop_further(context: UpdateHandlerContext):
                 context.run_data.further_connection.close()
         await query_message.set_reaction("👍")
 
+
+@bot_config.add_command_handler(
+    "intercept",
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    permissions=UserSelector.UserIDIsIn([Settings.owner_id]),
+    has_args=False,
+    blocking=True
+)
+async def intercept_further_execution(context: UpdateHandlerContext):
+    """Attempt to intercept @DabneyFurtherBot bot execution and create an interactive console on the server
+    Please don't run this command if you don't have access to the running process on the server.
+    """
+
+    query_message: Message = context.update.message
+    query_message_id = query_message.message_id
+
+    if context.run_data.further_process is None or not context.run_data.further_process.is_alive():
+        await context.send_message(
+            "Can't intercept Further Bot because it does not appear to be running",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id
+        )
+    else:
+        pid: int = context.run_data.further_process.pid
+        intercept(pid)
+        await query_message.set_reaction("👍")

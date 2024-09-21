@@ -27,7 +27,10 @@ class ResourceHandler:
             if self.claimed:
                 if self.io_wrapper is None or self.io_wrapper.closed:
                     self.claimed = False
-                    shutil.rmtree(self.path)
+                    if os.path.exists(self.path):
+                        shutil.rmtree(self.path)
+                    else:
+                        print(f"Warning: directory {self.path} does not exist")
                 else:
                     raise RuntimeError(f"{self.path} is still open")
             else:

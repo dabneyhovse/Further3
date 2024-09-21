@@ -10,7 +10,7 @@ from gadt import GADT
 class UpwardsCommunication(metaclass=GADT):
     CleanShutdown: UpwardsCommunication
     ExceptionShutdown: Callable[[Exception], UpwardsCommunication]
-    FloodControlIssues: UpwardsCommunication
+    FloodControlIssues: Callable[[int], UpwardsCommunication]
 
 
 class DownwardsCommunication(metaclass=GADT):

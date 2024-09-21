@@ -17,7 +17,8 @@ import opinions
 import pytubefix
 from audio_processing import AudioProcessingSettings
 from audio_queue import AudioQueue, AudioQueueElement
-from bot_config import BotConfig, edit_message_text
+from bot_config import BotConfig
+from flood_control_protection import protect_from_telegram_flood_control, protect_from_telegram_timeout
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
 from pytubefix import Search, YouTube, Playlist
 from settings import Settings
@@ -291,14 +292,15 @@ async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User,
     )
     download_resource = bot_config.resource_handler.claim()
 
+    @protect_from_telegram_timeout
+    @protect_from_telegram_flood_control(bot_config.connection_listener)
     async def message_edit_status(status: str, skip_index: int | None) -> None:
         keyboard = [
             [InlineKeyboardButton("Skip", callback_data=("skip_button", skip_index))]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         try:
-            await edit_message_text(
-                message,
+            await message.edit_text(
                 str(format_add_video_status(video, user if not part_of_playlist else None, postprocessing, status)),
                 parse_mode=ParseMode.HTML,
                 reply_markup=(reply_markup if skip_index is not None else None)
@@ -320,6 +322,8 @@ async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User,
     await context.run_data.queue.add(queue_element)
 
 
+@protect_from_telegram_flood_control(bot_config.connection_listener)
+@protect_from_telegram_timeout
 async def queue_playlist(context: UpdateHandlerContext, playlist: Playlist, user: User, query_message_id: int,
                          postprocessing: AudioProcessingSettings):
     message: Message = await context.send_message(
@@ -329,8 +333,7 @@ async def queue_playlist(context: UpdateHandlerContext, playlist: Playlist, user
     )
     for video in playlist.videos:
         await queue_video(context, video, user, message.message_id, postprocessing, part_of_playlist=True)
-    await edit_message_text(
-        message,
+    await message.edit_text(
         str(format_add_playlist_status(playlist, user, postprocessing, "Done loading")),
         parse_mode=ParseMode.HTML
     )
@@ -519,6 +522,34 @@ async def get_volume(context: UpdateHandlerContext):
 #         parse_mode=ParseMode.HTML,
 #         reply_to_message_id=query_message_id)
 
+@bot_config.add_command_handler(
+    ["quiet_hours", "get_quiet_hours", "qh"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    has_args=False
+)
+async def get_quiet_hours(context: UpdateHandlerContext):
+    """Get the currently configured quiet hours times"""
+    query_message: Message = context.update.message
+    query_message_id = query_message.message_id
+    await context.send_message(
+        str(
+            TreeMessage.Sequence([
+                TreeMessage.Named("Start", TreeMessage.Sequence([
+                    TreeMessage.Named("Week-nights", TreeMessage.Text(
+                        str(timedelta(hours=Settings.normal_quiet_hours_start_time))
+                    )),
+                    TreeMessage.Named("Weekend-nights", TreeMessage.Text(
+                        str(timedelta(hours=Settings.weekend_quiet_hours_start_time))
+                    ))
+                ])),
+                TreeMessage.Named("End", TreeMessage.Text(
+                    str(timedelta(hours=Settings.quiet_hours_end_time))
+                ))
+            ])
+        ),
+        parse_mode=ParseMode.HTML,
+        reply_to_message_id=query_message_id)
+
 
 @bot_config.add_command_handler(
     "wee",
@@ -573,7 +604,7 @@ async def test_ping(context: UpdateHandlerContext):
 
 # TODO: remove
 @bot_config.add_command_handler(
-    "test_set_quiet_hours",
+    ["test_set_quiet_hours", "tsqh"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
     has_args=1,
     user_selector_filter=UserSelector.MembershipStatusIsIn(
@@ -587,4 +618,5 @@ async def test_set_quiet_hours(context: UpdateHandlerContext):
     user: User = context.update.effective_user
     now: datetime = datetime.now()
     Settings.normal_quiet_hours_start_time = now.hour + (now.minute + float(context.args[0])) / 60 + now.second / 3600
+    Settings.weekend_quiet_hours_start_time = now.hour + (now.minute + float(context.args[0])) / 60 + now.second / 3600
     await query_message.delete()

@@ -167,7 +167,7 @@ class BotConfig:
 
     async def start_connection_listener(self):
         if self.connection_listener is not None:
-            create_task(self.connection_listener.listen(self.process_communication))
+            create_task(self.connection_listener.listen(self.process_communication))  # noqa
         else:
             raise ValueError("No ConnectionListener configured")
 
@@ -183,20 +183,3 @@ class BotConfig:
                     pass
             case DownwardsCommunication.ShutDown(1):
                 raise SystemExit()
-
-
-@protect_from_telegram_timeout
-@protect_from_telegram_flood_control
-async def edit_message_text(message: Message, text: str | FormattedText, **kwargs):
-    if isinstance(text, str):
-        text: FormattedText = FormattedText(text)
-    message_text: FormattedText = break_message_text(text)
-    return await message.edit_text(text=str(message_text), **kwargs)
-
-
-def break_message_text(message: FormattedText) -> FormattedText:
-    max_len: int = 4096
-    if len(message) > max_len:
-        return message[:max_len - 3] + FormattedText("...")
-    else:
-        return message
