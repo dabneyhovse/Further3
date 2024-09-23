@@ -168,7 +168,6 @@ async def further_bot_communications_handler(communication: UpwardsCommunication
         case UpwardsCommunication.FloodControlIssues(delay):
             resume_time = time() + delay
             if bot_config.run_data.flood_control_message is None:
-                print("Test")
                 bot_config.run_data.flood_control_message = await bot.send_message(
                     chat_id=Settings.registered_primary_chat_id,
                     text="Telegram flood control throttling detected - expect long delays"
