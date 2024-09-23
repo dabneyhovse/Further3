@@ -44,11 +44,6 @@ async def post_init(context: ApplicationHandlerContext):
     debugging.listen()
     await bot_config.start_connection_listener()
 
-    # TODO: Remove when unneeded
-    asyncio.get_running_loop().set_debug(True)
-    logging.basicConfig(level=logging.DEBUG)
-    asyncio.get_running_loop().slow_callback_duration = 0.050
-
 
 def format_add_video_status(video: YouTube, user: User | None, postprocessing: AudioProcessingSettings | None,
                             status: str | None) -> TreeMessage:

@@ -1,5 +1,4 @@
 import sys
-import traceback
 from asyncio import sleep
 from collections.abc import Callable, Coroutine
 from functools import wraps
@@ -26,16 +25,14 @@ def protect_from_telegram_flood_control[** P, T](f: Callable[P, Coroutine[None, 
             try:
                 if recovery_id >= 0:
                     print(f"Automatically recovering...\n"
-                          f"Recovery number: {recovery_id}\n", file=sys.stderr)
+                          f"\tRecovery number: {recovery_id}\n", file=sys.stderr)
                 return await f(*args, **kwargs)
             except RetryAfter as e:
                 recovery_id = next_recovery_id
-                print(f"Caught exception:\n"
-                      f"...\n"
-                      f"{e.message}\n"
-                      f"Recovery id: {recovery_id}\n"
-                      f"Retry number: {i + 1}\n"
-                      f"Will automatically recover.\n", file=sys.stderr)
+                print(f"Caught flood control exception:\n"
+                      f"\tRecovery id: {recovery_id}\n"
+                      f"\tRetry number: {i + 1}\n"
+                      f"\tWill automatically recover.\n", file=sys.stderr)
                 next_recovery_id += 1
                 await connection_listener.send(UpwardsCommunication.FloodControlIssues(e.retry_after))
                 await sleep(e.retry_after + Settings.flood_control_buffer_time)
@@ -55,15 +52,14 @@ def protect_from_telegram_timeout[** P, T](f: Callable[P, Coroutine[None, None, 
             try:
                 if recovery_id >= 0:
                     print(f"Automatically recovering...\n"
-                          f"Recovery number: {recovery_id}\n", file=sys.stderr)
+                          f"\tRecovery number: {recovery_id}\n", file=sys.stderr)
                 return await f(*args, **kwargs)
             except TimedOut:
                 recovery_id = next_recovery_id
-                print(f"Caught exception:\n"
-                      f"{traceback.format_exc()}\n"
-                      f"Recovery id: {recovery_id}\n"
-                      f"Retry number: {i + 1}\n"
-                      f"Will automatically recover.\n", file=sys.stderr)
+                print(f"Caught timeout exception:\n"
+                      f"\tRecovery id: {recovery_id}\n"
+                      f"\tRetry number: {i + 1}\n"
+                      f"\tWill automatically recover.\n", file=sys.stderr)
                 next_recovery_id += 1
                 await sleep(Settings.telegram_time_out_buffer_time)
         return await f(*args, **kwargs)

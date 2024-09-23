@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import traceback
 from asyncio import create_task, get_running_loop, sleep
 from multiprocessing import Process, Pipe
@@ -7,7 +8,7 @@ from multiprocessing.connection import Connection  # noqa
 from sys import stderr
 from time import time
 
-from telegram import Message, Bot
+from telegram import Message, Bot, Chat, ChatFullInfo
 from telegram.constants import ParseMode
 from telegram.ext import filters
 
@@ -17,6 +18,7 @@ from debugging import intercept
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
 from settings import Settings
 from user_selector import UserSelector, MembershipStatusFlag, ChatTypeFlag
+from util import count_iterable
 
 BOT_TOKEN_FILE = "sensitive/supervisor_bot_token.txt"
 
@@ -33,6 +35,8 @@ async def post_init(context: ApplicationHandlerContext):
     context.run_data.defaults.further_connection_listener = None
     context.run_data.defaults.flood_control_completion_time = 0
     context.run_data.defaults.flood_control_message = None
+
+    await clear_pinned_messages()
 
 
 @bot_config.add_command_handler(
@@ -135,7 +139,16 @@ def further_bot_target(connection: Connection):
     except Exception as e:
         connection.send(UpwardsCommunication.ExceptionShutdown(e))
     else:
+        for _ in range(10):
+            if count_iterable(threading.enumerate()) == 1:
+                break
+            else:
+                sleep(0.5)
+        else:
+            connection.send(UpwardsCommunication.ThreadingFailedShutdown)
+            return
         connection.send(UpwardsCommunication.CleanShutdown)
+    print("Shutdown complete")
 
 
 async def further_bot_communications_handler(communication: UpwardsCommunication):
@@ -155,13 +168,21 @@ async def further_bot_communications_handler(communication: UpwardsCommunication
         case UpwardsCommunication.FloodControlIssues(delay):
             resume_time = time() + delay
             if bot_config.run_data.flood_control_message is None:
+                print("Test")
                 bot_config.run_data.flood_control_message = await bot.send_message(
                     chat_id=Settings.registered_primary_chat_id,
-                    text="Telegram flood control throttling detected - expected long delays"
+                    text="Telegram flood control throttling detected - expect long delays"
                 )
-                get_running_loop().call_later(delay, clear_flood_control_message_callback)
+                await bot_config.run_data.flood_control_message.pin()
+                create_task(clear_flood_control_message_callback())
             elif resume_time > bot_config.run_data.flood_control_completion_time:
                 bot_config.run_data.flood_control_completion_time = resume_time
+        case UpwardsCommunication.ThreadingFailedShutdown:
+            await bot.send_message(
+                chat_id=Settings.registered_primary_chat_id,
+                text="Further Bot failed shutdown detected due to hanging threads. "
+                     "Increased shutdown force recommended."
+            )
 
 
 async def clear_flood_control_message_callback():
@@ -171,6 +192,15 @@ async def clear_flood_control_message_callback():
     if bot_config.run_data.flood_control_message is not None:
         await bot_config.run_data.flood_control_message.delete()
         bot_config.run_data.flood_control_message = None
+
+
+async def clear_pinned_messages():
+    bot: Bot = bot_config.application.bot
+    chat: ChatFullInfo = await bot.get_chat(Settings.registered_primary_chat_id)
+    while chat.pinned_message is not None:
+        await chat.pinned_message.unpin()
+        await chat.pinned_message.delete()
+        chat: ChatFullInfo = await bot.get_chat(Settings.registered_primary_chat_id)
 
 
 @bot_config.add_command_handler(

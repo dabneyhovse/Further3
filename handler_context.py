@@ -28,7 +28,7 @@ class HandlerContext(ABC):
 
     @property
     def run_data(self):
-        return AttrDictView(self.application.bot_config.run_data)
+        return self.application.bot_config.run_data
 
 
 class ApplicationHandlerContext(HandlerContext):

@@ -11,6 +11,7 @@ class UpwardsCommunication(metaclass=GADT):
     CleanShutdown: UpwardsCommunication
     ExceptionShutdown: Callable[[Exception], UpwardsCommunication]
     FloodControlIssues: Callable[[int], UpwardsCommunication]
+    ThreadingFailedShutdown: UpwardsCommunication
 
 
 class DownwardsCommunication(metaclass=GADT):

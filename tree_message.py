@@ -35,9 +35,9 @@ class TreeMessage(metaclass=GADT):
                     ("\n" * self.sequence_nesting_depth).join(str(sub) for sub in sequence if sub != TreeMessage.Skip)
                 )
             case TreeMessage.Named(key, TreeMessage.Sequence(_) as value):
-                return f"<u>{key}</u>:\n{indent}{str(value).replace('\n', '\n' + indent)}"
+                return f"<b>{key}:</b>\n{indent}{str(value).replace('\n', '\n' + indent)}"
             case TreeMessage.Named(key, value):
-                return f"<u>{key}</u>: {value}"
+                return f"<b>{key}:</b> {value}"
 
     def __or__(self, other: TreeMessage) -> TreeMessage:
         match self:

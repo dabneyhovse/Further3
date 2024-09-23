@@ -5,6 +5,7 @@ import re
 from asyncio import create_task, get_running_loop
 from collections.abc import Collection, Callable
 from functools import wraps, cached_property
+from typing import Any
 
 from telegram import Message, User, Bot, Chat
 from telegram.constants import ParseMode
@@ -12,6 +13,7 @@ from telegram.ext import MessageHandler, ApplicationBuilder, CommandHandler, Bas
     CallbackQueryHandler, Application
 from telegram.ext.filters import BaseFilter
 
+from attr_dict import AttrDictView
 from bot_communication import DownwardsCommunication, ConnectionListener
 from decorator_tools import arg_decorator, method_decorator, map_first_arg_decorator, map_all_args_decorator, \
     map_all_to_first_arg_decorator
@@ -95,7 +97,11 @@ class BotConfig:
         self.handlers: list[BaseHandler] = []
         self.post_init_handler = None
 
-        self.run_data = dict()
+        self._run_data = dict()
+
+    @property
+    def run_data(self) -> AttrDictView[str, Any]:
+        return AttrDictView(self._run_data)
 
     @method_decorator(map_first_arg_decorator(map_all_args_decorator(ApplicationHandlerContext)))
     def add_post_init_handler(self, f):
