@@ -575,43 +575,23 @@ async def hoo(context: UpdateHandlerContext):
 
 
 @bot_config.add_command_handler(
-    "test_ping",
+    "send_registration_information",
     filters=~filters.UpdateType.EDITED_MESSAGE,
-    user_selector_filter=UserSelector.MembershipStatusIsIn(
-        MembershipStatusFlag.ADMINISTRATOR | MembershipStatusFlag.OWNER
+    user_selector_filter=UserSelector.ChatIDIsIn(
+        [Settings.registered_primary_chat_id]
     ),
     hide_from_help=True
 )
-async def test_ping(context: UpdateHandlerContext):
+async def send_registration_information(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
     user: User = context.update.effective_user
     print(
-        f"Test ping received.\n"
-        f"Message ID: {query_message_id}\n"
-        f"Username: {user.username}\n"
-        f"User ID: {user.id}\n"
-        f"Chat name: {context.chat.effective_name}\n"
-        f"Chat ID: {context.chat.id}\n\n"
+        f"Registration request received:\n"
+        f"\tMessage ID: {query_message_id}\n"
+        f"\tUsername: {user.username}\n"
+        f"\tUser ID: {user.id}\n"
+        f"\tChat name: {context.chat.effective_name}\n"
+        f"\tChat ID: {context.chat.id}\n\n"
     )
-    await query_message.delete()
-
-
-# TODO: remove
-@bot_config.add_command_handler(
-    ["test_set_quiet_hours", "tsqh"],
-    filters=~filters.UpdateType.EDITED_MESSAGE,
-    has_args=1,
-    user_selector_filter=UserSelector.MembershipStatusIsIn(
-        MembershipStatusFlag.ADMINISTRATOR | MembershipStatusFlag.OWNER
-    ),
-    hide_from_help=True
-)
-async def test_set_quiet_hours(context: UpdateHandlerContext):
-    query_message: Message = context.update.message
-    query_message_id = query_message.message_id
-    user: User = context.update.effective_user
-    now: datetime = datetime.now()
-    Settings.normal_quiet_hours_start_time = now.hour + (now.minute + float(context.args[0])) / 60 + now.second / 3600
-    Settings.weekend_quiet_hours_start_time = now.hour + (now.minute + float(context.args[0])) / 60 + now.second / 3600
     await query_message.delete()

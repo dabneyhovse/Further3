@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import threading
+import time
 import traceback
 from asyncio import create_task, get_running_loop, sleep
 from multiprocessing import Process, Pipe
 from multiprocessing.connection import Connection  # noqa
 from sys import stderr
-from time import time
 
 from telegram import Message, Bot, Chat, ChatFullInfo
 from telegram.constants import ParseMode
@@ -85,7 +85,7 @@ async def complain(context: UpdateHandlerContext):
 
     context.bot_data.defaults.last_complaint_time = 0
     last_complaint_time: float = context.bot_data.last_complaint_time
-    if time() - last_complaint_time > 60 * 5:
+    if time.time() - last_complaint_time > 60 * 5:
         for comptroller_id in Settings.comptroller_ids:
             await context.bot.send_message(
                 chat_id=comptroller_id,
@@ -96,7 +96,7 @@ async def complain(context: UpdateHandlerContext):
             text=f"bc33b6204cedf60452a886fa8715e7e6acacc06ebc28a6c8eda0b3c869001d0c\n"
                  f"Complaint sent to Further bot: {query_message.link}"
         )
-        context.bot_data.last_complaint_time = time()
+        context.bot_data.last_complaint_time = time.time()
         await context.send_message(
             "The comptrollers and I have been notified, and I will respond shortly if I'm not busy. "
             "This command rings my phone loudly and persistently enough to wake the dead, so if I don't respond, "
@@ -127,7 +127,7 @@ async def reset_complain(context: UpdateHandlerContext):
 
     query_message: Message = context.update.message
 
-    context.bot_data.last_complaint_time = time() + ((float(context.args[0]) if context.args else 0) - 5) * 60
+    context.bot_data.last_complaint_time = time.time() + ((float(context.args[0]) if context.args else 0) - 5) * 60
 
     await query_message.delete()
 
@@ -143,12 +143,11 @@ def further_bot_target(connection: Connection):
             if count_iterable(threading.enumerate()) == 1:
                 break
             else:
-                sleep(0.5)
+                time.sleep(0.5)
         else:
             connection.send(UpwardsCommunication.ThreadingFailedShutdown)
             return
         connection.send(UpwardsCommunication.CleanShutdown)
-    print("Shutdown complete")
 
 
 async def further_bot_communications_handler(communication: UpwardsCommunication):
@@ -166,7 +165,7 @@ async def further_bot_communications_handler(communication: UpwardsCommunication
             )
             print(traceback.format_exception(e), file=stderr)
         case UpwardsCommunication.FloodControlIssues(delay):
-            resume_time = time() + delay
+            resume_time = time.time() + delay
             if bot_config.run_data.flood_control_message is None:
                 bot_config.run_data.flood_control_message = await bot.send_message(
                     chat_id=Settings.registered_primary_chat_id,
@@ -179,15 +178,15 @@ async def further_bot_communications_handler(communication: UpwardsCommunication
         case UpwardsCommunication.ThreadingFailedShutdown:
             await bot.send_message(
                 chat_id=Settings.registered_primary_chat_id,
-                text="Further Bot failed shutdown detected due to hanging threads. "
+                text="Further Bot incomplete shutdown detected due to hanging threads. "
                      "Increased shutdown force recommended."
             )
 
 
 async def clear_flood_control_message_callback():
     while bot_config.run_data.flood_control_message is not None and \
-            time() >= bot_config.run_data.flood_control_completion_time:
-        await sleep(time() - bot_config.run_data.flood_control_completion_time + Settings.async_sleep_refresh_rate)
+            time.time() >= bot_config.run_data.flood_control_completion_time:
+        await sleep(time.time() - bot_config.run_data.flood_control_completion_time + Settings.async_sleep_refresh_rate)
     if bot_config.run_data.flood_control_message is not None:
         await bot_config.run_data.flood_control_message.delete()
         bot_config.run_data.flood_control_message = None
