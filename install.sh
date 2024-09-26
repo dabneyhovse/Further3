@@ -3,7 +3,7 @@
 if [ ! -e ".venv/bin/activate" ]
 then
   echo "Did not find a Python virtual environment. Creating one now."
-  python -m venv .venvw
+  python -m venv .venv
 else
   echo "Found existing Python virtual environment."
 fi
@@ -14,4 +14,10 @@ source ./.venv/bin/activate
 pip install --upgrade pip
 pip install --upgrade certifi
 pip install "python-telegram-bot[all]" pytubefix python-vlc
-brew install ffmpeg
+
+if { command -v brew 2>&1; } > /dev/null
+then
+  brew install ffmpeg
+else
+  apt install ffmpeg
+fi
