@@ -28,5 +28,15 @@ class Settings:
     flood_control_buffer_time: float = 1
     max_telegram_flood_control_retries: int = 4
 
+    # Yt-dlp
+    ydl_opts = {
+        'format': 'm4a/bestaudio/best',
+        # ℹ️ See help(yt_dlp.postprocessor) for a list of available Postprocessors and their arguments
+        'postprocessors': [{  # Extract audio using ffmpeg
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'm4a',
+        }]
+    }
+
     telegram_time_out_buffer_time: float = 1
     max_telegram_time_out_retries: int = 4

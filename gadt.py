@@ -4,9 +4,7 @@ import inspect
 from collections.abc import Callable as CollectionsABCCallable
 from collections.abc import _CallableGenericAlias as CollectionsABCCallableGenericAlias  # noqa
 from types import GenericAlias as TypesGenericAlias
-from typing import Callable as TypingCallable, Any, Self, get_args, TypeVar
-
-from pycparser.c_ast import Compound
+from typing import Callable as TypingCallable, Any, Self, TypeVar
 
 type _CompoundConstrType = TypesGenericAlias | CollectionsABCCallableGenericAlias
 type ConstrType = GADT | _CompoundConstrType

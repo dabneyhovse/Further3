@@ -34,9 +34,7 @@ class AudioQueueElement:
 
     @staticmethod
     def _download_audio(stream: Stream, resource_path: Path) -> Path:
-        print("DownloadTag 6")
         out = Path(stream.download(mp3=True, output_path=str(resource_path)))
-        print("DownloadTag 7")
         return out
 
     async def set_message(self, message: str, skippable: bool = True) -> None:
@@ -44,23 +42,10 @@ class AudioQueueElement:
 
     async def download(self):
         try:
-            print("DownloadTag 1")
             await self.set_message("Downloading")
-            print("DownloadTag 2")
-            s = self.video.streams
-            print("DownloadTag 2.1")
-            f = s.filter(only_audio=True, subtype="mp4")
-            print("DownloadTag 2.2")
-            o = f.order_by("abr")
-            print("DownloadTag 2.3")
-            l = o.last()
-            print("DownloadTag 2.4")
             stream: Stream = self.video.streams.get_audio_only()
-            print("DownloadTag 3")
             path: Path = await to_thread(self._download_audio, stream, self.resource.path)
-            print("DownloadTag 4")
             await self.set_message("Processing")
-            print("DownloadTag 5")
             if self.processing.pitch_shift != 0:
                 processed_path: Path = self.resource.path / "processed.mp3"
                 await ffmpeg_pitch_shift(self.processing.pitch_scale, path, processed_path)
