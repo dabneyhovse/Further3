@@ -11,7 +11,7 @@ from simpleaudio import PlayObject
 from telegram.ext import Application
 
 from async_multiprocessing import await_process
-from audio_processing import audio_transform
+from old_audio_processing import audio_transform
 from bot_config import BotConfig
 from resource_handler import ResourceHandler
 
