@@ -327,8 +327,10 @@ async def update_further(context: UpdateHandlerContext):
         stderr=subprocess.PIPE
     )
     stdout_result, stderr_result = (bytes_str.decode() for bytes_str in await proc.communicate())
-    print(f"Update stdout:\n{stdout_result}\n", file=stderr)
-    print(f"Update stderr:\n{stderr_result}\n", file=stderr)
+    if stdout_result:
+        print(f"Update stdout:\n{stdout_result}\n", file=stderr)
+    if stderr_result:
+        print(f"Update stderr:\n{stderr_result}\n", file=stderr)
     commit_message_proc: subprocess.Process = await create_subprocess_shell(
         f"git log -1 --pretty=%B",
         stdout=subprocess.PIPE,
