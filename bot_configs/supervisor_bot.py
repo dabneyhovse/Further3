@@ -277,7 +277,7 @@ async def stop_further(context: UpdateHandlerContext):
 
 
 @bot_config.add_command_handler(
-    ["restart_process"],
+    ["restart_process", "restart_service"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
     permissions=UserSelector.And(
         UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR),
