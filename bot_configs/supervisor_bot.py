@@ -331,11 +331,12 @@ async def update_further(context: UpdateHandlerContext):
     print(f"Update stderr:\n{stderr_result}\n")
     if stderr_result:
         await context.send_message(
-            "Error",
+            "Update error",
             parse_mode=ParseMode.HTML,
             reply_to_message_id=update_message.id
         )
     else:
+        await update_message.delete()
         await query_message.set_reaction("👍")
 
 
