@@ -329,21 +329,14 @@ async def update_further(context: UpdateHandlerContext):
     stdout_result, stderr_result = (bytes_str.decode() for bytes_str in await proc.communicate())
     print(f"Update stdout:\n{stdout_result}\n", file=stderr)
     print(f"Update stderr:\n{stderr_result}\n", file=stderr)
-    if stderr_result:
-        await context.send_message(
-            "Update error",
-            parse_mode=ParseMode.HTML,
-            reply_to_message_id=update_message.id
-        )
-    else:
-        commit_message_proc: subprocess.Process = await create_subprocess_shell(
-            f"git log -1 --pretty=%B",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        stdout_commit_message, _ = (bytes_str.decode() for bytes_str in await commit_message_proc.communicate())
-        await update_message.edit_text(f"Updated to: {stdout_commit_message}")
-        await query_message.set_reaction("👍")
+    commit_message_proc: subprocess.Process = await create_subprocess_shell(
+        f"git log -1 --pretty=%B",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    stdout_commit_message, _ = (bytes_str.decode() for bytes_str in await commit_message_proc.communicate())
+    await update_message.edit_text(f"Updated to: {stdout_commit_message}")
+    await query_message.set_reaction("👍")
 
 
 @bot_config.add_command_handler(
