@@ -29,3 +29,4 @@ class YoutubeDLAudioSource(AudioSource):
         # RealDabneyVictory: YoutubeDLAudioSource.Query
 
     def __init__(self, query: Query):
+        pass

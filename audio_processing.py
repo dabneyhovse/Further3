@@ -1,4 +1,5 @@
 from asyncio import create_subprocess_shell, subprocess
+from asyncio.subprocess import Process
 from dataclasses import dataclass
 from pathlib import Path
 from sys import stderr
@@ -42,7 +43,7 @@ class AudioProcessingSettings:
 async def ffmpeg_pitch_shift(scale: float, source_path: Path, dest_path: Path):
     clean_source: str = escape_str(source_path.absolute().as_posix(), "\"")
     clean_dest: str = escape_str(dest_path.absolute().as_posix(), "\"")
-    proc = await create_subprocess_shell(
+    proc: Process = await create_subprocess_shell(
         f"ffmpeg -i \"{clean_source}\" -af asetrate=44100*{scale},aresample=44100,atempo=1/{scale} \"{clean_dest}\"",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE

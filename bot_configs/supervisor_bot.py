@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 import traceback
-from asyncio import create_task, get_running_loop, sleep
+from asyncio import create_task, get_running_loop, sleep, subprocess
+from asyncio.subprocess import create_subprocess_shell
 from multiprocessing import Process, Pipe
 from multiprocessing.connection import Connection  # noqa
-from sys import stderr
+from sys import stderr, stdout
 
 from telegram import Message, Bot, Chat, ChatFullInfo
 from telegram.constants import ParseMode
@@ -20,7 +22,7 @@ from settings import Settings
 from user_selector import UserSelector, MembershipStatusFlag, ChatTypeFlag
 from util import count_iterable
 
-BOT_TOKEN_FILE = "sensitive/supervisor_bot_token.txt"
+BOT_TOKEN_FILE = Settings.supervisor_bot_token_path
 
 bot_config = BotConfig(
     BOT_TOKEN_FILE,
@@ -272,6 +274,70 @@ async def stop_further(context: UpdateHandlerContext):
             case 2:
                 context.run_data.further_process.terminate()
                 context.run_data.further_connection.close()
+        await query_message.set_reaction("👍")
+
+
+@bot_config.add_command_handler(
+    ["restart_process"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    permissions=UserSelector.And(
+        UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR),
+        UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
+    ),
+    has_args=1,
+    blocking=True
+)
+async def restart_process(context: UpdateHandlerContext):
+    """Attempt to restart the Further and Further Supervisor server process"""
+
+    query_message: Message = context.update.message
+    query_message_id = query_message.message_id
+
+    await context.send_message(
+        "Restarting process...",
+        parse_mode=ParseMode.HTML,
+        reply_to_message_id=query_message_id
+    )
+    os.system("systemctl restart further")
+
+
+@bot_config.add_command_handler(
+    ["update", "update_further"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    permissions=UserSelector.And(
+        UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR),
+        UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
+    ),
+    has_args=1,
+    blocking=True
+)
+async def update_further(context: UpdateHandlerContext):
+    """Attempt to update further
+    Pulls from the git repository. Restart required afterwords.
+    """
+
+    query_message: Message = context.update.message
+    query_message_id = query_message.message_id
+
+    update_message: Message = await context.send_message(
+        "Updating...",
+        parse_mode=ParseMode.HTML,
+        reply_to_message_id=query_message_id
+    )
+    proc: subprocess.Process = await create_subprocess_shell(
+        f"git pull",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    stdout_result, stderr_result = (bytes_str.decode() for bytes_str in await proc.communicate())
+    if stderr_result:
+        await context.send_message(
+            "Error",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=update_message.id
+        )
+        print(f"Update issue:\n{stderr_result}\n", file=stderr)
+    else:
         await query_message.set_reaction("👍")
 
 

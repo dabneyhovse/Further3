@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import asyncio
-import logging
 from asyncio import Future
-from datetime import datetime, timedelta
+from datetime import timedelta
 from math import log
 from typing import cast
 
+import pytubefix
+from pytubefix import Search, YouTube, Playlist
 from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
@@ -14,19 +14,17 @@ from telegram.ext import filters
 
 import debugging
 import opinions
-import pytubefix
 from audio_processing import AudioProcessingSettings
 from audio_queue import AudioQueue, AudioQueueElement
 from bot_config import BotConfig
 from flood_control_protection import protect_from_telegram_flood_control, protect_from_telegram_timeout
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
-from pytubefix import Search, YouTube, Playlist
 from settings import Settings
 from tree_message import TreeMessage
 from user_selector import UserSelector, ChatTypeFlag, MembershipStatusFlag
 from util import count_iterable
 
-BOT_TOKEN_FILE = "sensitive/further_bot_token.txt"
+BOT_TOKEN_FILE = Settings.further_bot_token_path
 
 bot_config = BotConfig(
     BOT_TOKEN_FILE,
