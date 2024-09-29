@@ -72,8 +72,7 @@ async def get_help(context: UpdateHandlerContext):
                 MembershipStatusFlag.RESTRICTED | MembershipStatusFlag.NONMEMBER | MembershipStatusFlag.LEFT
             )
         )
-    ),
-    has_args=False
+    )
 )
 async def complain(context: UpdateHandlerContext):
     """Ping me and the comptrollers about an issue
@@ -284,7 +283,6 @@ async def stop_further(context: UpdateHandlerContext):
         UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR),
         UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
     ),
-    has_args=1,
     blocking=True
 )
 async def restart_process(context: UpdateHandlerContext):
@@ -308,7 +306,6 @@ async def restart_process(context: UpdateHandlerContext):
         UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR),
         UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
     ),
-    has_args=1,
     blocking=True
 )
 async def update_further(context: UpdateHandlerContext):
@@ -330,13 +327,14 @@ async def update_further(context: UpdateHandlerContext):
         stderr=subprocess.PIPE
     )
     stdout_result, stderr_result = (bytes_str.decode() for bytes_str in await proc.communicate())
+    print(f"Update stdout:\n{stdout_result}\n")
+    print(f"Update stderr:\n{stderr_result}\n")
     if stderr_result:
         await context.send_message(
             "Error",
             parse_mode=ParseMode.HTML,
             reply_to_message_id=update_message.id
         )
-        print(f"Update issue:\n{stderr_result}\n", file=stderr)
     else:
         await query_message.set_reaction("👍")
 

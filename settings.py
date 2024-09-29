@@ -8,8 +8,8 @@ class Settings:
     debug: bool = False
 
     # Bot config paths
-    further_bot_token_path: str = "sensitive/furthermore/further_bot_token.txt"
-    supervisor_bot_token_path: str = "sensitive/furthermore/supervisor_bot_token.txt"
+    further_bot_token_path: str = "sensitive/further_bot_token.txt"
+    supervisor_bot_token_path: str = "sensitive/supervisor_bot_token.txt"
 
     # User and chat registration
     registered_primary_chat_id: int
