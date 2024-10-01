@@ -26,8 +26,11 @@ class ConnectionListener[T]:
 
     async def listen(self, handler: Callable[[T], Coroutine[None, None, None]]):
         while True:
-            communication: T = await to_thread(self.connection.recv)
-            await handler(communication)
+            try:
+                communication: T = await to_thread(self.connection.recv)
+                await handler(communication)
+            except EOFError:
+                return
 
     async def send(self, communication: UpwardsCommunication):
         self.connection.send(communication)

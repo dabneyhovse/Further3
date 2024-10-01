@@ -277,26 +277,30 @@ async def stop_further(context: UpdateHandlerContext):
 
 
 @bot_config.add_command_handler(
-    ["restart_process", "restart_service"],
+    ["stop_process", "stop_service"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
     permissions=UserSelector.And(
         UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR),
         UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
     ),
+    has_args=0,
     blocking=True
 )
-async def restart_process(context: UpdateHandlerContext):
-    """Attempt to restart the Further and Further Supervisor server process"""
+async def stop_process(context: UpdateHandlerContext):
+    """Attempt to stop the Further and Further Supervisor server process"""
 
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
 
-    await context.send_message(
-        "Restarting process...",
-        parse_mode=ParseMode.HTML,
-        reply_to_message_id=query_message_id
-    )
-    os.system("systemctl restart further")
+    if context.run_data.further_process is not None and context.run_data.further_process.is_alive():
+        await context.send_message(
+            "Can't stop Supervisor Bot because Further appears to be running.",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id
+        )
+    else:
+        await query_message.set_reaction("👍")
+        raise SystemExit()
 
 
 @bot_config.add_command_handler(
@@ -337,7 +341,11 @@ async def update_further(context: UpdateHandlerContext):
         stderr=subprocess.PIPE
     )
     stdout_commit_message, _ = (bytes_str.decode() for bytes_str in await commit_message_proc.communicate())
-    await update_message.edit_text(f"Updated to: {stdout_commit_message}")
+    await update_message.edit_text(
+        f"Already up to date: {stdout_commit_message}"
+        if "Already up to date." in stdout_result else
+        f"Updated to: {stdout_commit_message}"
+    )
     await query_message.set_reaction("👍")
 
 
@@ -366,3 +374,31 @@ async def intercept_further_execution(context: UpdateHandlerContext):
         pid: int = context.run_data.further_process.pid
         intercept(pid)
         await query_message.set_reaction("👍")
+
+
+@bot_config.add_command_handler(
+    "status",
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    has_args=False,
+    blocking=True
+)
+async def intercept_further_execution(context: UpdateHandlerContext):
+    """Attempt to intercept @DabneyFurtherBot bot execution and create an interactive console on the server
+    Please don't run this command if you don't have access to the running process on the server.
+    """
+
+    query_message: Message = context.update.message
+    query_message_id = query_message.message_id
+
+    if context.run_data.further_process is None or not context.run_data.further_process.is_alive():
+        await context.send_message(
+            "Further bot not running",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id
+        )
+    else:
+        await context.send_message(
+            "Further bot running",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id
+        )
