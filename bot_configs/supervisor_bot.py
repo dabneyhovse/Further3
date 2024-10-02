@@ -276,7 +276,7 @@ async def stop_further(context: UpdateHandlerContext):
             reply_to_message_id=query_message_id
         )
     else:
-        force: int = int(context.args[0] or 1)
+        force: int = int(context.args[0] if context.args else 1)
         match force:
             case 0 | 1:
                 context.run_data.further_connection.send(DownwardsCommunication.ShutDown(force))
