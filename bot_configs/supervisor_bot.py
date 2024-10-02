@@ -17,7 +17,7 @@ from telegram.ext import filters
 from bot_communication import ConnectionListener, DownwardsCommunication, UpwardsCommunication
 from bot_config import BotConfig
 from debugging import intercept
-from handler_context import UpdateHandlerContext, ApplicationHandlerContext
+from handler_context import UpdateHandlerContext, ApplicationHandlerContext, HandlerContext
 from settings import Settings
 from user_selector import UserSelector, MembershipStatusFlag, ChatTypeFlag
 from util import count_iterable
@@ -39,6 +39,7 @@ async def post_init(context: ApplicationHandlerContext):
     context.run_data.defaults.flood_control_message = None
 
     await clear_pinned_messages()
+    await try_to_start_further(context)
 
 
 @bot_config.add_command_handler(
@@ -202,6 +203,26 @@ async def clear_pinned_messages():
         chat: ChatFullInfo = await bot.get_chat(Settings.registered_primary_chat_id)
 
 
+async def try_to_start_further(context: HandlerContext):
+    if context.run_data.further_process is not None and context.run_data.further_process.is_alive():
+        return False
+    else:
+        if context.run_data.further_process is not None:
+            context.run_data.further_process.close()
+            context.run_data.further_connection.close()
+
+        context.run_data.further_connection, further_side_connection = Pipe()
+        context.run_data.further_process = Process(
+            target=further_bot_target, args=(further_side_connection,),
+            daemon=True
+        )
+        context.run_data.further_connection_listener = ConnectionListener(context.run_data.further_connection)
+        create_task(context.run_data.further_connection_listener.listen(further_bot_communications_handler))  # noqa
+
+    context.run_data.further_process.start()
+    return True
+
+
 @bot_config.add_command_handler(
     "start_further",
     filters=~filters.UpdateType.EDITED_MESSAGE,
@@ -218,27 +239,13 @@ async def start_further(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
 
-    if context.run_data.further_process is not None and context.run_data.further_process.is_alive():
+    if not try_to_start_further(context):
         await context.send_message(
             "Can't start Further Bot because it is already running",
             parse_mode=ParseMode.HTML,
             reply_to_message_id=query_message_id
         )
         return
-    else:
-        if context.run_data.further_process is not None:
-            context.run_data.further_process.close()
-            context.run_data.further_connection.close()
-
-        context.run_data.further_connection, further_side_connection = Pipe()
-        context.run_data.further_process = Process(
-            target=further_bot_target, args=(further_side_connection,),
-            daemon=True
-        )
-        context.run_data.further_connection_listener = ConnectionListener(context.run_data.further_connection)
-        create_task(context.run_data.further_connection_listener.listen(further_bot_communications_handler))  # noqa
-
-    context.run_data.further_process.start()
 
     await query_message.set_reaction("👍")
 
