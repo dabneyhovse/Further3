@@ -6,6 +6,7 @@ import time
 import traceback
 from asyncio import create_task, get_running_loop, sleep, subprocess
 from asyncio.subprocess import create_subprocess_shell
+from datetime import datetime
 from multiprocessing import Process, Pipe
 from multiprocessing.connection import Connection  # noqa
 from sys import stderr, stdout
@@ -19,6 +20,7 @@ from bot_config import BotConfig
 from debugging import intercept
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext, HandlerContext
 from settings import Settings
+from tree_message import TreeMessage
 from user_selector import UserSelector, MembershipStatusFlag, ChatTypeFlag
 from util import count_iterable
 
@@ -40,6 +42,8 @@ async def post_init(context: ApplicationHandlerContext):
 
     await clear_pinned_messages()
     await try_to_start_further(context)
+
+    context.run_data.run_start_time = datetime.now()
 
 
 @bot_config.add_command_handler(
@@ -310,6 +314,16 @@ async def stop_process(context: UpdateHandlerContext):
         raise SystemExit()
 
 
+async def get_version():
+    commit_message_proc: subprocess.Process = await create_subprocess_shell(
+        f"git log -1 --pretty=%B",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    stdout_commit_message, _ = (bytes_str.decode() for bytes_str in await commit_message_proc.communicate())
+    return stdout_commit_message
+
+
 @bot_config.add_command_handler(
     ["update", "update_further"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
@@ -342,16 +356,11 @@ async def update_further(context: UpdateHandlerContext):
         print(f"Update stdout:\n{stdout_result}\n", file=stderr)
     if stderr_result:
         print(f"Update stderr:\n{stderr_result}\n", file=stderr)
-    commit_message_proc: subprocess.Process = await create_subprocess_shell(
-        f"git log -1 --pretty=%B",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
-    stdout_commit_message, _ = (bytes_str.decode() for bytes_str in await commit_message_proc.communicate())
+    version: str = await get_version()
     await update_message.edit_text(
-        f"Already up to date: {stdout_commit_message}"
+        f"Already up to date: {version}"
         if "Already up to date." in stdout_result else
-        f"Updated to: {stdout_commit_message}"
+        f"Updated to: {version}"
         f"Send /stop_process to restart and apply updates."
     )
     await query_message.set_reaction("👍")
@@ -406,7 +415,24 @@ async def intercept_further_execution(context: UpdateHandlerContext):
         )
     else:
         await context.send_message(
-            "Further bot running",
+            str(
+                TreeMessage.Sequence([
+                    TreeMessage.Named("Version", TreeMessage.Text(await get_version())),
+                    TreeMessage.Named(
+                        "Further bot",
+                        TreeMessage.Text(
+                            "running"
+                            if
+                            context.run_data.further_process is not None and context.run_data.further_process.is_alive()
+                            else "stopped"
+                        )
+                    ),
+                    TreeMessage.Named(
+                        "Startup time",
+                        TreeMessage.Text(str(context.run_data.further_process.start_time))
+                    ),
+                ])
+            ),
             parse_mode=ParseMode.HTML,
             reply_to_message_id=query_message_id
         )
