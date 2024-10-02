@@ -261,7 +261,6 @@ async def start_further(context: UpdateHandlerContext):
         UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR),
         UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
     ),
-    has_args=1,
     blocking=True
 )
 async def stop_further(context: UpdateHandlerContext):
@@ -277,7 +276,7 @@ async def stop_further(context: UpdateHandlerContext):
             reply_to_message_id=query_message_id
         )
     else:
-        force: int = int(context.args[0])
+        force: int = int(context.args[0] or 1)
         match force:
             case 0 | 1:
                 context.run_data.further_connection.send(DownwardsCommunication.ShutDown(force))
@@ -361,7 +360,7 @@ async def update_further(context: UpdateHandlerContext):
         f"Already up to date: {version}"
         if "Already up to date." in stdout_result else
         f"Updated to: {version}"
-        f"Send /stop_process to restart and apply updates."
+        f"Send /stop_further and then /stop_process to restart and apply updates."
     )
     await query_message.set_reaction("👍")
 
