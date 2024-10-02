@@ -352,6 +352,7 @@ async def update_further(context: UpdateHandlerContext):
         f"Already up to date: {stdout_commit_message}"
         if "Already up to date." in stdout_result else
         f"Updated to: {stdout_commit_message}"
+        f"Send /stop_process to restart and apply updates."
     )
     await query_message.set_reaction("👍")
 
