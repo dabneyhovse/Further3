@@ -320,7 +320,7 @@ async def get_version():
         stderr=subprocess.PIPE
     )
     stdout_commit_message, _ = (bytes_str.decode() for bytes_str in await commit_message_proc.communicate())
-    return stdout_commit_message
+    return stdout_commit_message.strip()
 
 
 @bot_config.add_command_handler(
@@ -428,7 +428,7 @@ async def intercept_further_execution(context: UpdateHandlerContext):
                     ),
                     TreeMessage.Named(
                         "Startup time",
-                        TreeMessage.Text(str(context.run_data.further_process.start_time))
+                        TreeMessage.Text(str(context.run_data.run_start_time))
                     ),
                 ])
             ),
