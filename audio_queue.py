@@ -133,6 +133,8 @@ class AudioQueue(Iterable[AudioQueueElement]):
 
         player.audio_set_volume(self.player.audio_get_volume())
 
+        await sleep(1)
+
         media: Media = instance.media_new_path(path)
         player.set_media(media)
 
