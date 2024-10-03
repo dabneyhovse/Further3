@@ -133,12 +133,13 @@ class AudioQueue(Iterable[AudioQueueElement]):
 
         player.audio_set_volume(self.player.audio_get_volume())
 
-        await sleep(1)
-
         media: Media = instance.media_new_path(path)
         player.set_media(media)
 
-        player.set_rate(element.processing.tempo_scale)
+        if element.processing.tempo_scale != 1:
+            player.set_rate(element.processing.tempo_scale)
+
+        await sleep(1)
 
         player.play()
         element.active = True
@@ -172,7 +173,8 @@ class AudioQueue(Iterable[AudioQueueElement]):
                 media: Media = self.instance.media_new_path(path)
                 self.player.set_media(media)
 
-                self.player.set_rate(element.processing.tempo_scale)
+                if element.processing.tempo_scale != 1:
+                    self.player.set_rate(element.processing.tempo_scale)
 
                 await element.set_message("Playing")
 
