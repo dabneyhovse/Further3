@@ -45,8 +45,8 @@ class AudioQueueElement:
             await self.set_message("Downloading")
             stream: Stream = self.video.streams.get_audio_only()
             path: Path = await to_thread(self._download_audio, stream, self.resource.path)
-            await self.set_message("Processing")
             if self.processing.pitch_shift != 0:
+                await self.set_message("Processing")  # Can be removed if Telegram throttling is too bad
                 processed_path: Path = self.resource.path / "processed.mp3"
                 await ffmpeg_pitch_shift(self.processing.pitch_scale, path, processed_path)
                 path = processed_path
@@ -117,13 +117,47 @@ class AudioQueue(Iterable[AudioQueueElement]):
         download_task = get_event_loop().create_task(element.download())
         element.download_task.set_result(download_task)
 
+    async def play_without_queue(self, element: AudioQueueElement) -> None:
+        if element.skipped:
+            return
+        path: PathLike = await element.path
+        if path is None:
+            assert element.skipped
+            return
+
+        if is_quiet_hours():
+            return
+
+        instance: Instance = Instance()
+        player = instance.media_player_new()
+
+        player.audio_set_volume(self.player.audio_get_volume())
+
+        media: Media = instance.media_new_path(path)
+        player.set_media(media)
+
+        player.set_rate(element.processing.tempo_scale)
+
+        player.play()
+        element.active = True
+
+        while player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not element.skipped and \
+                not is_quiet_hours():
+            await sleep(Settings.async_sleep_refresh_rate)
+
+        if player.get_state() not in (VLCState.Ended, VLCState.Stopped):
+            player.stop()
+
+        # TODO: release() media if needed
+        await element.finish()
+
     async def play_queue(self) -> None:
         async with self.queue.async_iter() as async_iterator:
             async for element in async_iterator:
                 if element.skipped:
                     continue
                 self.current = element
-                path: str = await element.path
+                path: PathLike = await element.path
                 if path is None:
                     assert element.skipped
                     self.current = None

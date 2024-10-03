@@ -374,6 +374,49 @@ async def enqueue(context: UpdateHandlerContext):
             return
 
 
+@bot_config.add_command_handler(
+    ["hampter"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    has_args=False,
+    permissions=UserSelector.And(
+        UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id]),
+        UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR)
+    )
+)
+async def hampter(context: UpdateHandlerContext):
+    """Hampter"""
+    query_message: Message = context.update.message
+    query_message_id: int = query_message.message_id
+
+    query_text = "https://youtu.be/q4vy7BcAVJg?si=6GlR7WEyHpMdVm7q"
+
+    video: YouTube | None = find_video(query_text)
+    if video is not None:
+        download_resource = bot_config.resource_handler.claim()
+
+        async def async_noop(*args, **kwargs):
+            pass
+
+        queue_element: AudioQueueElement = AudioQueueElement(
+            id=context.run_data.queue.get_id(),
+            resource=download_resource,
+            video=video,
+            processing=AudioProcessingSettings(),
+            message_setter=async_noop,
+            path=Future(),
+            download_task=Future()
+        )
+        await queue_element.download()
+        await context.run_data.queue.play_without_queue(queue_element)
+        await query_message.set_reaction("👍")
+    else:
+        await context.send_message(
+            "Couldn't find video or playlist",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id)
+        return
+
+
 @bot_config.add_callback_query_handler(...)
 async def callback_query_handler(context: UpdateHandlerContext):
     query: CallbackQuery = context.update.callback_query
