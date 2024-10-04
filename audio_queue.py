@@ -18,7 +18,7 @@ from settings import Settings
 
 @dataclass
 class AudioQueueElement:
-    id: int
+    element_id: int
     resource: ResourceHandler.Resource
     video: YouTube
     processing: AudioProcessingSettings
@@ -38,7 +38,7 @@ class AudioQueueElement:
         return out
 
     async def set_message(self, message: str, skippable: bool = True) -> None:
-        await self.message_setter(message, self.id if skippable else None)
+        await self.message_setter(message, self.element_id if skippable else None)
 
     async def download(self):
         try:
@@ -170,27 +170,30 @@ class AudioQueue(Iterable[AudioQueueElement]):
                     await self.skip_all("@GoToBedFroshDitchDayIsTomorrow (quiet hours)")
                     continue
 
-                media: Media = self.instance.media_new_path(path)
-                self.player.set_media(media)
+                while not element.skipped:
+                    media: Media = self.instance.media_new_path(path)
+                    self.player.set_media(media)
 
-                if element.processing.tempo_scale != 1:
                     self.player.set_rate(element.processing.tempo_scale)
 
-                await element.set_message("Playing")
+                    await element.set_message("Playing")
 
-                self.player.play()
-                element.active = True
+                    self.player.play()
+                    element.active = True
 
-                while self.player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not element.skipped and \
-                        not is_quiet_hours():
-                    # TODO: Wait for the duration or skip or quiet hours (whichever first)
-                    await sleep(Settings.async_sleep_refresh_rate)
+                    while self.player.get_state() not in (VLCState.Ended, VLCState.Stopped) and \
+                            not element.skipped and not is_quiet_hours():
+                        # TODO: Wait for the duration or skip or quiet hours (whichever first)
+                        await sleep(Settings.async_sleep_refresh_rate)
 
-                if is_quiet_hours():
-                    await self.skip_all("@GoToBedFroshDitchDayIsTomorrow (quiet hours)")
+                    if is_quiet_hours():
+                        await self.skip_all("@GoToBedFroshDitchDayIsTomorrow (quiet hours)")
 
-                if self.player.get_state() not in (VLCState.Ended, VLCState.Stopped):
-                    self.player.stop()
+                    if self.player.get_state() not in (VLCState.Ended, VLCState.Stopped):
+                        self.player.stop()
+
+                    if not element.processing.loop:
+                        break
 
                 # TODO: release() media if needed
                 await element.finish()
@@ -210,11 +213,11 @@ class AudioQueue(Iterable[AudioQueueElement]):
                 skip_tasks.create_task(element.skip(username))
             skip_tasks.create_task(self.current.skip(username))
 
-    async def skip_specific(self, username: str, id: int) -> bool:
-        if self.current is not None and self.current.id == id:
+    async def skip_specific(self, username: str, element_id: int) -> bool:
+        if self.current is not None and self.current.element_id == element_id:
             return await self.skip(username)
         for element in self.queue:
-            if element.id == id:
+            if element.element_id == element_id:
                 await element.skip(username)
                 return True
         return False

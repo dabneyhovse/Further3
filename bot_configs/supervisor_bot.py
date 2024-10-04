@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import os
 import threading
 import time
 import traceback
-from asyncio import create_task, get_running_loop, sleep, subprocess
+from asyncio import create_task, sleep, subprocess
 from asyncio.subprocess import create_subprocess_shell
 from datetime import datetime
 from multiprocessing import Process, Pipe
 from multiprocessing.connection import Connection  # noqa
-from sys import stderr, stdout
+from sys import stderr
 
-from telegram import Message, Bot, Chat, ChatFullInfo
+from telegram import Message, Bot, ChatFullInfo
 from telegram.constants import ParseMode
 from telegram.ext import filters
 

@@ -49,7 +49,12 @@ def format_add_video_status(video: YouTube, user: User | None, postprocessing: A
         TreeMessage.Named("Queued song", TreeMessage.InlineCode(video.title)),
         TreeMessage.Named("Author", TreeMessage.InlineCode(video.author)),
         TreeMessage.Named("Queued by", TreeMessage.Text(user.name)) if user is not None else TreeMessage.Skip,
-        TreeMessage.Named("Duration", TreeMessage.Text(str(timedelta(seconds=video.length)))),
+        TreeMessage.Named(
+            "Duration",
+            TreeMessage.Text(str(timedelta(seconds=video.length)))
+            if not postprocessing.loop else
+            TreeMessage.Text("∞")
+        ),
         TreeMessage.Named("Post-processing", TreeMessage.Text(str(postprocessing)))
         if postprocessing else TreeMessage.Skip,
         TreeMessage.Named("Status", TreeMessage.Text(status)) if status is not None else TreeMessage.Skip
@@ -107,6 +112,8 @@ def format_get_queue(queue: AudioQueue) -> TreeMessage:
                         )
                     )
                 )))
+                if not any(element.processing.loop for element in songs) else
+                TreeMessage.Text("∞")
             )
         ]),
         TreeMessage.Named(
@@ -245,17 +252,8 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int):
                 case ["nightcore" | "night-core" | "sped up" | "sped-up"]:
                     postprocessing.pitch_shift = 12 * log(1.35) / log(2)
                     postprocessing.tempo_scale = 1.35
-                case ["echo", strength_str]:
-                    strength: float | None = await parse_float(strength_str, context, query_message_id)
-                    if strength is None:
-                        return
-                    if not 0 <= strength:
-                        await context.send_message(
-                            f"Echo strength must be in the range [0, 1]",
-                            parse_mode=ParseMode.HTML,
-                            reply_to_message_id=query_message_id)
-                        return
-                    postprocessing.echo = (strength / 2, 1 / 16 + strength / 8, 0.5)
+                case ["loop" | "repeat"] | ["loop" "forever"]:
+                    postprocessing.loop = True
                 case _:
                     await context.send_message(
                         f"Unknown postprocessing command: {arg_text}",
@@ -304,7 +302,7 @@ async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User,
 
     await message_edit_status("Adding to queue", None)
     queue_element: AudioQueueElement = AudioQueueElement(
-        id=context.run_data.queue.get_id(),
+        element_id=context.run_data.queue.get_id(),
         resource=download_resource,
         video=video,
         processing=postprocessing,
@@ -398,7 +396,7 @@ async def hampter(context: UpdateHandlerContext):
             pass
 
         queue_element: AudioQueueElement = AudioQueueElement(
-            id=context.run_data.queue.get_id(),
+            element_id=context.run_data.queue.get_id(),
             resource=download_resource,
             video=video,
             processing=AudioProcessingSettings(),

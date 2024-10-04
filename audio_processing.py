@@ -14,9 +14,11 @@ class AudioProcessingSettings:
     tempo_scale: float = 1
     percussive_harmonic_balance: float = 0
     echo: tuple[float, float, float] = (0, 0, 0)
+    loop: bool = False
 
     def __bool__(self) -> bool:
-        return self.pitch_shift != 0 or self.tempo_scale != 1 or self.percussive_harmonic_balance != 0
+        return (self.pitch_shift != 0 or self.tempo_scale != 1 or self.percussive_harmonic_balance != 0 or
+                any(self.echo) or self.loop)
 
     def __str__(self) -> str:
         out: str = "In"
@@ -32,6 +34,8 @@ class AudioProcessingSettings:
             out += f" \u2192 Speed = {self.tempo_scale:.2f}"
         if all(self.echo):
             out += f" \u2192 Echo (power, distance, cos) = {self.echo:.2f}"
+        if self.loop:
+            out += f" \u2192 Loop forever"
         out += " \u2192 Out"
         return out
 
