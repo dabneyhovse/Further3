@@ -242,7 +242,7 @@ async def start_further(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
 
-    if not try_to_start_further(context):
+    if not await try_to_start_further(context):
         await context.send_message(
             "Can't start Further Bot because it is already running",
             parse_mode=ParseMode.HTML,
