@@ -28,9 +28,13 @@ class Settings:
     # Waiting refresh rates
     async_sleep_refresh_rate: float = 0.25
 
-    # Automated error recovery/
+    # Automated error recovery
     flood_control_buffer_time: float = 1
     max_telegram_flood_control_retries: int = 4
+
+    # Amogus
+
+    amogus_ban_id: int
 
     # Yt-dlp
     # TODO: Set type to save

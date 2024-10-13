@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from asyncio import Future
-from datetime import timedelta
+from datetime import timedelta, datetime
 from math import log
-from typing import cast
+from typing import cast, Tuple
 
 import pytubefix
 from pytubefix import Search, YouTube, Playlist
-from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ChatMember
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import filters
@@ -645,12 +645,8 @@ async def send_registration_information(context: UpdateHandlerContext):
     hide_from_help=True
 )
 async def amogus(context: UpdateHandlerContext):
-    """To do"""
+    """Instantly bans @AlanTheTable for 6.9 minutes"""
     query_message: Message = context.update.message
-    query_message_id = query_message.message_id
-    user: User = context.update.effective_user
 
-    print(f"User id: {user.id}")
-
-    # alan: User = context.chat.ban_member(chat.)
-    # await user
+    await context.chat.ban_member(Settings.amogus_ban_id, until_date=(datetime.now() + timedelta(minutes=6.9)))
+    await query_message.set_reaction("👍")
