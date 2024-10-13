@@ -634,3 +634,23 @@ async def send_registration_information(context: UpdateHandlerContext):
         f"\tChat ID: {context.chat.id}\n\n"
     )
     await query_message.delete()
+
+
+@bot_config.add_command_handler(
+    "amogus",
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    user_selector_filter=UserSelector.ChatIDIsIn(
+        [Settings.registered_primary_chat_id]
+    ),
+    hide_from_help=True
+)
+async def amogus(context: UpdateHandlerContext):
+    """To do"""
+    query_message: Message = context.update.message
+    query_message_id = query_message.message_id
+    user: User = context.update.effective_user
+
+    print(f"User id: {user.id}")
+
+    # alan: User = context.chat.ban_member(chat.)
+    # await user
