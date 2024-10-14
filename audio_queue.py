@@ -166,7 +166,7 @@ class AudioQueue(Iterable[AudioQueueElement]):
     #
     #     await element.finish()
 
-    async def hampter(self) -> None:
+    async def hampter(self, delay: float = 1) -> None:
         if is_quiet_hours():
             return
 
@@ -188,7 +188,7 @@ class AudioQueue(Iterable[AudioQueueElement]):
             if player.get_state() not in (VLCState.Ended, VLCState.Stopped):
                 player.stop()
 
-            await sleep(Settings.async_sleep_refresh_rate * 2)
+            await sleep(delay)
 
         media: Media = instance.media_new_path(Settings.hampter_path)
         player.set_media(media)
