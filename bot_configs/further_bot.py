@@ -375,7 +375,7 @@ async def enqueue(context: UpdateHandlerContext):
 @bot_config.add_command_handler(
     ["hampter"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
-    # has_args=False, TODO
+    has_args=False,
     permissions=UserSelector.And(
         UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id]),
         UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR)
@@ -385,7 +385,7 @@ async def hampter(context: UpdateHandlerContext):
     """Hampter"""
     query_message: Message = context.update.message
 
-    await context.run_data.queue.hampter(int(context.args[0]) if context.args else 0)
+    await context.run_data.queue.hampter()
     await query_message.set_reaction("👍")
 
 

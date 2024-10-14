@@ -34,7 +34,6 @@ class Settings:
 
     # Hampter
     hampter_path: str | None = "audio_files/hampter.wav"
-    sound_starter_path: str | None = "audio_files/sound_starter.wav"
 
     # Amogus
     amogus_ban_id: int
