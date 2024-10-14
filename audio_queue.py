@@ -188,6 +188,8 @@ class AudioQueue(Iterable[AudioQueueElement]):
             if player.get_state() not in (VLCState.Ended, VLCState.Stopped):
                 player.stop()
 
+            await sleep(Settings.async_sleep_refresh_rate * 2)
+
         media: Media = instance.media_new_path(Settings.hampter_path)
         player.set_media(media)
 
