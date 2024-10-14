@@ -32,8 +32,10 @@ class Settings:
     flood_control_buffer_time: float = 1
     max_telegram_flood_control_retries: int = 4
 
-    # Amogus
+    # Sound starter
+    sound_starter_path: str | None = "audio_files/sound_starter.wav"
 
+    # Amogus
     amogus_ban_id: int
 
     # Yt-dlp

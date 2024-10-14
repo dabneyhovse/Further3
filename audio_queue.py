@@ -129,9 +129,23 @@ class AudioQueue(Iterable[AudioQueueElement]):
             return
 
         instance: Instance = Instance()
-        player = instance.media_player_new()
+        player: MediaPlayer = instance.media_player_new()
 
         player.audio_set_volume(self.player.audio_get_volume())
+
+        if Settings.sound_starter_path is not None:
+            starter_media: Media = instance.media_new_path(Settings.sound_starter_path)
+            player.set_media(starter_media)
+
+            player.set_rate(1)
+
+            player.play()
+            while player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not element.skipped and \
+                    not is_quiet_hours():
+                await sleep(Settings.async_sleep_refresh_rate)
+
+            if player.get_state() not in (VLCState.Ended, VLCState.Stopped):
+                player.stop()
 
         media: Media = instance.media_new_path(path)
         player.set_media(media)
@@ -139,7 +153,7 @@ class AudioQueue(Iterable[AudioQueueElement]):
         if element.processing.tempo_scale != 1:
             player.set_rate(element.processing.tempo_scale)
 
-        await sleep(1)
+        await sleep(Settings.async_sleep_refresh_rate)
 
         player.play()
         element.active = True
