@@ -33,7 +33,7 @@ class Settings:
     max_telegram_flood_control_retries: int = 4
 
     # Hampter
-    hampter_path: str | None = "audio_files/hampter.mp3"
+    hampter_path: str | None = "audio_files/hampter.wav"
     sound_starter_path: str | None = "audio_files/sound_starter.wav"
 
     # Amogus
