@@ -117,14 +117,56 @@ class AudioQueue(Iterable[AudioQueueElement]):
         download_task = get_event_loop().create_task(element.download())
         element.download_task.set_result(download_task)
 
-    async def play_without_queue(self, element: AudioQueueElement) -> None:
-        if element.skipped:
-            return
-        path: PathLike = await element.path
-        if path is None:
-            assert element.skipped
-            return
+    # TODO return this when there is a FileAudioSource
+    # async def play_without_queue(self, element: AudioQueueElement) -> None:
+    #     if element.skipped:
+    #         return
+    #     path: PathLike = await element.path
+    #     if path is None:
+    #         assert element.skipped
+    #         return
+    #
+    #     if is_quiet_hours():
+    #         return
+    #
+    #     instance: Instance = Instance()
+    #     player: MediaPlayer = instance.media_player_new()
+    #
+    #     player.audio_set_volume(self.player.audio_get_volume())
+    #
+    #     if Settings.sound_starter_path is not None:
+    #         starter_media: Media = instance.media_new_path(Settings.sound_starter_path)
+    #         player.set_media(starter_media)
+    #
+    #         player.set_rate(1)
+    #
+    #         player.play()
+    #         while player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not element.skipped and \
+    #                 not is_quiet_hours():
+    #             await sleep(Settings.async_sleep_refresh_rate)
+    #
+    #         if player.get_state() not in (VLCState.Ended, VLCState.Stopped):
+    #             player.stop()
+    #
+    #     media: Media = instance.media_new_path(path)
+    #     player.set_media(media)
+    #
+    #     if element.processing.tempo_scale != 1:
+    #         player.set_rate(element.processing.tempo_scale)
+    #
+    #     player.play()
+    #     element.active = True
+    #
+    #     while player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not element.skipped and \
+    #             not is_quiet_hours():
+    #         await sleep(Settings.async_sleep_refresh_rate)
+    #
+    #     if player.get_state() not in (VLCState.Ended, VLCState.Stopped):
+    #         player.stop()
+    #
+    #     await element.finish()
 
+    async def hampter(self) -> None:
         if is_quiet_hours():
             return
 
@@ -133,40 +175,29 @@ class AudioQueue(Iterable[AudioQueueElement]):
 
         player.audio_set_volume(self.player.audio_get_volume())
 
+        player.set_rate(1)
+
         if Settings.sound_starter_path is not None:
             starter_media: Media = instance.media_new_path(Settings.sound_starter_path)
             player.set_media(starter_media)
 
-            player.set_rate(1)
-
             player.play()
-            while player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not element.skipped and \
-                    not is_quiet_hours():
+            while player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not is_quiet_hours():
                 await sleep(Settings.async_sleep_refresh_rate)
 
             if player.get_state() not in (VLCState.Ended, VLCState.Stopped):
                 player.stop()
 
-        media: Media = instance.media_new_path(path)
+        media: Media = instance.media_new_path(Settings.hampter_path)
         player.set_media(media)
 
-        if element.processing.tempo_scale != 1:
-            player.set_rate(element.processing.tempo_scale)
-
-        await sleep(Settings.async_sleep_refresh_rate)
-
         player.play()
-        element.active = True
 
-        while player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not element.skipped and \
-                not is_quiet_hours():
+        while player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not is_quiet_hours():
             await sleep(Settings.async_sleep_refresh_rate)
 
         if player.get_state() not in (VLCState.Ended, VLCState.Stopped):
             player.stop()
-
-        # TODO: release() media if needed
-        await element.finish()
 
     async def play_queue(self) -> None:
         async with self.queue.async_iter() as async_iterator:

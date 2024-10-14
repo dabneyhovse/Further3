@@ -32,7 +32,8 @@ class Settings:
     flood_control_buffer_time: float = 1
     max_telegram_flood_control_retries: int = 4
 
-    # Sound starter
+    # Hampter
+    hampter_path: str | None = "audio_files/hampter.mp3"
     sound_starter_path: str | None = "audio_files/sound_starter.wav"
 
     # Amogus
