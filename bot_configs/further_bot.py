@@ -376,10 +376,7 @@ async def enqueue(context: UpdateHandlerContext):
     ["hampter"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
     has_args=False,
-    permissions=UserSelector.And(
-        UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id]),
-        UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR)
-    )
+    permissions=UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
 )
 async def hampter(context: UpdateHandlerContext):
     """Hampter"""
