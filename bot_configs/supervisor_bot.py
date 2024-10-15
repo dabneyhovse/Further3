@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 import traceback
@@ -217,7 +218,8 @@ async def try_to_start_further(context: HandlerContext):
         context.run_data.further_connection, further_side_connection = Pipe()
         context.run_data.further_process = Process(
             target=further_bot_target, args=(further_side_connection,),
-            daemon=True
+            daemon=True,
+            name="FurtherBot"
         )
         context.run_data.further_connection_listener = ConnectionListener(context.run_data.further_connection)
         create_task(context.run_data.further_connection_listener.listen(further_bot_communications_handler))  # noqa
@@ -292,7 +294,6 @@ async def stop_further(context: UpdateHandlerContext):
         UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR),
         UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
     ),
-    has_args=0,
     blocking=True
 )
 async def stop_process(context: UpdateHandlerContext):
@@ -301,15 +302,41 @@ async def stop_process(context: UpdateHandlerContext):
     query_message: Message = context.update.message
     query_message_id = query_message.message_id
 
-    if context.run_data.further_process is not None and context.run_data.further_process.is_alive():
+    allow_stop_further: bool = False
+    force: bool = False
+
+    for arg in context.args:
+        for sub_arg in arg.lstrip("-") if arg.startswith("-") and not arg.startswith("--") else (arg,):
+            match sub_arg:
+                case "i":
+                    allow_stop_further = True
+                case "f":
+                    force = True
+
+    if (
+            (not allow_stop_further)
+            and (context.run_data.further_process is not None)
+            and (context.run_data.further_process.is_alive())
+    ):
         await context.send_message(
-            "Can't stop Supervisor Bot because Further appears to be running.",
+            "Can't stop Supervisor Bot because Further appears to be running. Rerun with -i if you want to stop the "
+            "process anyways.",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id
+        )
+    elif allow_stop_further and force:
+        await context.send_message(
+            "<u><i>This is NOT the command you are looking for</i></u>. Do not attempt to stop Supervisor Bot with "
+            "both -f and -i. This is a very bad idea. It will orphan the Further Bot process and break everything.",
             parse_mode=ParseMode.HTML,
             reply_to_message_id=query_message_id
         )
     else:
         await query_message.set_reaction("👍")
-        raise SystemExit()
+        if force:
+            os._exit(1)  # noqa
+        else:
+            raise SystemExit()
 
 
 async def get_version():
