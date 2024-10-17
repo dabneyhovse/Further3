@@ -7,7 +7,8 @@ from typing import cast, Tuple
 
 import pytubefix
 from pytubefix import Search, YouTube, Playlist
-from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ChatMember
+from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ChatMember, ChatFullInfo, \
+    ChatPermissions
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import filters
@@ -553,7 +554,8 @@ async def get_quiet_hours(context: UpdateHandlerContext):
             ])
         ),
         parse_mode=ParseMode.HTML,
-        reply_to_message_id=query_message_id)
+        reply_to_message_id=query_message_id
+    )
 
 
 @bot_config.add_command_handler(
@@ -567,7 +569,8 @@ async def wee(context: UpdateHandlerContext):
     await context.send_message(
         f"/hoo",
         parse_mode=ParseMode.HTML,
-        reply_to_message_id=query_message_id)
+        reply_to_message_id=query_message_id
+    )
 
 
 @bot_config.add_command_handler(
@@ -581,7 +584,8 @@ async def hoo(context: UpdateHandlerContext):
     await context.send_message(
         f"/wee",
         parse_mode=ParseMode.HTML,
-        reply_to_message_id=query_message_id)
+        reply_to_message_id=query_message_id
+    )
 
 
 @bot_config.add_command_handler(
@@ -613,11 +617,46 @@ async def send_registration_information(context: UpdateHandlerContext):
     user_selector_filter=UserSelector.ChatIDIsIn(
         [Settings.registered_primary_chat_id]
     ),
-    hide_from_help=True
+    has_args=False
 )
 async def amogus(context: UpdateHandlerContext):
-    """Instantly bans @AlanTheTable for 6.9 minutes"""
+    """Instantly mutes @AlanTheTable for 6.9 minutes"""
+    query_message: Message = context.update.message
+    query_message_id = query_message.message_id
+
+    result: bool = await context.chat.restrict_member(
+        Settings.amogus_ban_id,
+        ChatPermissions.no_permissions(),
+        until_date=(datetime.now() + timedelta(minutes=6.9))
+    )
+    if result:
+        await context.send_message(
+            f"@AlanTheTable has been banned for 6.9 minutes",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id
+        )
+    else:
+        await query_message.delete()
+
+
+@bot_config.add_command_handler(
+    "sus",
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    user_selector_filter=UserSelector.ChatIDIsIn(
+        [Settings.registered_primary_chat_id]
+    ),
+    has_args=False
+)
+async def sus(context: UpdateHandlerContext):
+    """End @AlanTheTable's ban/mute :("""
     query_message: Message = context.update.message
 
-    await context.chat.ban_member(Settings.amogus_ban_id, until_date=(datetime.now() + timedelta(minutes=6.9)))
-    await query_message.set_reaction("👍")
+    result: bool = await context.chat.unban_member(Settings.amogus_ban_id, only_if_banned=True)
+    result |= await context.chat.restrict_member(
+        Settings.amogus_ban_id,
+        ChatPermissions.all_permissions()
+    )
+    if result:
+        await query_message.set_reaction("👍")
+    else:
+        await query_message.delete()

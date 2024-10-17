@@ -1,7 +1,11 @@
 from collections.abc import Collection
 from dataclasses import dataclass
 
+from telegram import ChatFullInfo, ChatMember
+from telegram.error import BadRequest
+
 from handler_context import UpdateHandlerContext
+from settings import Settings
 from tree_message import TreeMessage
 from user_selector import UserSelector
 
@@ -38,7 +42,13 @@ class HelpMessage:
                 args_message = TreeMessage.Text(str(self.has_args))
 
         async def user_name_lookup(u_id: int) -> str:
-            return f"&lt;User {u_id}&gt;"  # TODO: try to look up username
+            user_name: str
+            try:
+                chat: ChatFullInfo = await context.bot.get_chat(Settings.registered_primary_chat_id)
+                member: ChatMember = await chat.get_member(u_id)
+                return f"@{member.user.username}"
+            except BadRequest:
+                return f"&lt;User {u_id}&gt;"
 
         async def chat_name_lookup(c_id: int) -> str:
             chat_name: str = (await context.bot.get_chat(c_id)).effective_name
