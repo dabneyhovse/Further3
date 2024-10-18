@@ -70,6 +70,11 @@ class GADT(type):
         cls_annotation_locals = {
             cls.__name__: cls
         }
+
+        if hasattr(cls, "__annotation_locals__"):
+            cls_annotation_locals.update(cls.__annotation_locals__)
+            print("YoutubeDLAudioSource" in cls.__annotation_locals__)
+
         cls_annotations = inspect.get_annotations(cls, eval_str=True, locals=cls_annotation_locals)
         cls.__constructors__ = {}
         for constr_name, constr_type in cls_annotations.items():

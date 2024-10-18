@@ -3,6 +3,7 @@ from __future__ import annotations
 import code
 import os
 import signal
+import time
 import traceback
 
 
@@ -19,6 +20,7 @@ def debug_callback(_sig, frame):
                "Traceback:\n" +
                "".join(traceback.format_stack(frame)))
     console.interact(message)
+    time.sleep(10)
 
 
 def listen():

@@ -5,8 +5,7 @@ from datetime import timedelta, datetime
 from math import log
 from typing import cast, Tuple
 
-import pytubefix
-from pytubefix import Search, YouTube, Playlist
+import validators
 from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ChatMember, ChatFullInfo, \
     ChatPermissions
 from telegram.constants import ParseMode
@@ -17,13 +16,14 @@ import debugging
 import opinions
 from audio_processing import AudioProcessingSettings
 from audio_queue import AudioQueue, AudioQueueElement
+from audio_sources import AudioSource, yt_dlp_audio_source
+from audio_sources.yt_dlp_audio_source import YtDLPAudioSource
 from bot_config import BotConfig
 from flood_control_protection import protect_from_telegram_flood_control, protect_from_telegram_timeout
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
 from settings import Settings
 from tree_message import TreeMessage
 from user_selector import UserSelector, ChatTypeFlag, MembershipStatusFlag
-from util import count_iterable
 
 BOT_TOKEN_FILE = Settings.further_bot_token_path
 
@@ -44,15 +44,19 @@ async def post_init(context: ApplicationHandlerContext):
     await bot_config.start_connection_listener()
 
 
-def format_add_video_status(video: YouTube, user: User | None, postprocessing: AudioProcessingSettings | None,
+def format_add_video_status(audio_source: AudioSource, user: User | None,
+                            postprocessing: AudioProcessingSettings | None,
                             status: str | None) -> TreeMessage:
     return TreeMessage.Sequence([
-        TreeMessage.Named("Queued song", TreeMessage.InlineCode(video.title)),
-        TreeMessage.Named("Author", TreeMessage.InlineCode(video.author)),
+        TreeMessage.Named("Queued song", TreeMessage.InlineCode(audio_source.title)),
+        TreeMessage.Named(
+            audio_source.author_and_author_type[0].title(),
+            TreeMessage.InlineCode(audio_source.author_and_author_type[1])
+        ),
         TreeMessage.Named("Queued by", TreeMessage.Text(user.name)) if user is not None else TreeMessage.Skip,
         TreeMessage.Named(
             "Duration",
-            TreeMessage.Text(str(timedelta(seconds=video.length)))
+            TreeMessage.Text(str(audio_source.duration))
             if not postprocessing.loop else
             TreeMessage.Text("∞")
         ),
@@ -62,37 +66,17 @@ def format_add_video_status(video: YouTube, user: User | None, postprocessing: A
     ])
 
 
-def format_add_playlist_status(playlist: Playlist, user: User, postprocessing: AudioProcessingSettings,
-                               status: str) -> TreeMessage:
-    return TreeMessage.Sequence([
-        TreeMessage.Named("Queued playlist", TreeMessage.InlineCode(playlist.title)),
-        TreeMessage.Named("Owner", TreeMessage.InlineCode(playlist.owner)),
-        TreeMessage.Named("Queued by", TreeMessage.Text(user.name)),
-        TreeMessage.Named("Songs", TreeMessage.Text(str(count_iterable(playlist.videos)))),
-        TreeMessage.Named("Post-processing", TreeMessage.Text(str(postprocessing)))
-        if postprocessing else TreeMessage.Skip,
-        TreeMessage.Named("Status", TreeMessage.Text(status))
-    ])
-
-
-def find_video(query_text: str) -> YouTube | None:
-    try:
-        video: YouTube = YouTube(query_text)
-        return video
-    except pytubefix.exceptions.RegexMatchError:
-        search: Search = Search(query_text)
-        videos: list[YouTube] = search.videos
-        return videos[0] if videos else None
-
-
-def find_playlist(query_text: str) -> Playlist | None:
-    try:
-        playlist: Playlist = Playlist(query_text)
-        return playlist
-    except pytubefix.exceptions.RegexMatchError:
-        search: Search = Search(query_text)
-        playlists: list[Playlist] = search.playlist
-        return playlists[0] if playlists else None
+# def format_add_playlist_status(playlist: Playlist, user: User, postprocessing: AudioProcessingSettings,
+#                                status: str) -> TreeMessage:
+#     return TreeMessage.Sequence([
+#         TreeMessage.Named("Queued playlist", TreeMessage.InlineCode(playlist.title)),
+#         TreeMessage.Named("Owner", TreeMessage.InlineCode(playlist.owner)),
+#         TreeMessage.Named("Queued by", TreeMessage.Text(user.name)),
+#         TreeMessage.Named("Songs", TreeMessage.Text(str(count_iterable(playlist.videos)))),
+#         TreeMessage.Named("Post-processing", TreeMessage.Text(str(postprocessing)))
+#         if postprocessing else TreeMessage.Skip,
+#         TreeMessage.Named("Status", TreeMessage.Text(status))
+#     ])
 
 
 def format_get_queue(queue: AudioQueue) -> TreeMessage:
@@ -105,9 +89,9 @@ def format_get_queue(queue: AudioQueue) -> TreeMessage:
                 "Remaining play time",
                 TreeMessage.Text(str(timedelta(
                     seconds=round(
-                        sum(element.video.length for element in songs) +
+                        sum(element.audio_source.duration for element in songs) +
                         (
-                            queue.current.video.length - queue.player.get_time() / 1000
+                            queue.current.audio_source.duration - queue.player.get_time() / 1000
                             if queue.state in [AudioQueue.State.PLAYING, AudioQueue.State.PAUSED] else
                             0
                         )
@@ -119,7 +103,7 @@ def format_get_queue(queue: AudioQueue) -> TreeMessage:
         ]),
         TreeMessage.Named(
             "Current",
-            format_add_video_status(queue.current.video, None, queue.current.processing, None)
+            format_add_video_status(queue.current.audio_source, None, queue.current.processing, None)
             if queue.current is not None and not queue.current.skipped else
             TreeMessage.Text("&lt;None&gt;")
         ),
@@ -127,7 +111,7 @@ def format_get_queue(queue: AudioQueue) -> TreeMessage:
             "Queue",
             TreeMessage.Sequence([
                 TreeMessage.Sequence([
-                    format_add_video_status(element.video, None, element.processing, None)
+                    format_add_video_status(element.audio_source, None, element.processing, None)
                 ])
                 for element in queue if not element.skipped
             ]) if queue.queue else TreeMessage.Text("&lt;Empty&gt;")
@@ -182,7 +166,8 @@ async def parse_float(s: str, context: UpdateHandlerContext, query_message_id: i
     return out
 
 
-async def parse_query(context: UpdateHandlerContext, query_message_id: int):
+async def parse_query(context: UpdateHandlerContext, query_message_id: int) -> \
+        tuple[AudioSource, AudioProcessingSettings] | None:
     postprocessing: AudioProcessingSettings = AudioProcessingSettings()
 
     query_text: str = ""
@@ -272,13 +257,20 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int):
                 query_text += " "
             query_text += arg
 
-    return query_text, postprocessing
+    yt_dlp_query: yt_dlp_audio_source.Query
+    if validators.url(query_text):
+        yt_dlp_query = yt_dlp_audio_source.Query.URL(query_text)
+    else:
+        yt_dlp_query = yt_dlp_audio_source.Query.YTSearch(query_text)
+
+    return YtDLPAudioSource(yt_dlp_query), postprocessing
 
 
-async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User, query_message_id: int,
+async def queue_video(context: UpdateHandlerContext, audio_source: AudioSource, user: User, query_message_id: int,
                       postprocessing: AudioProcessingSettings, part_of_playlist: bool = False):
     message: Message = await context.send_message(
-        str(format_add_video_status(video, user if not part_of_playlist else None, postprocessing, "Downloading")),
+        str(format_add_video_status(audio_source, user if not part_of_playlist else None, postprocessing,
+                                    "Downloading")),
         parse_mode=ParseMode.HTML,
         reply_to_message_id=query_message_id
     )
@@ -293,7 +285,8 @@ async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User,
         reply_markup = InlineKeyboardMarkup(keyboard)
         try:
             await message.edit_text(
-                str(format_add_video_status(video, user if not part_of_playlist else None, postprocessing, status)),
+                str(format_add_video_status(audio_source, user if not part_of_playlist else None, postprocessing,
+                                            status)),
                 parse_mode=ParseMode.HTML,
                 reply_markup=(reply_markup if skip_index is not None else None)
             )
@@ -305,7 +298,7 @@ async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User,
     queue_element: AudioQueueElement = AudioQueueElement(
         element_id=context.run_data.queue.get_id(),
         resource=download_resource,
-        video=video,
+        audio_source=audio_source,
         processing=postprocessing,
         message_setter=message_edit_status,
         path=Future(),
@@ -314,21 +307,21 @@ async def queue_video(context: UpdateHandlerContext, video: YouTube, user: User,
     await context.run_data.queue.add(queue_element)
 
 
-@protect_from_telegram_flood_control(bot_config.connection_listener)
-@protect_from_telegram_timeout
-async def queue_playlist(context: UpdateHandlerContext, playlist: Playlist, user: User, query_message_id: int,
-                         postprocessing: AudioProcessingSettings):
-    message: Message = await context.send_message(
-        str(format_add_playlist_status(playlist, user, postprocessing, "Loading")),
-        parse_mode=ParseMode.HTML,
-        reply_to_message_id=query_message_id
-    )
-    for video in playlist.videos:
-        await queue_video(context, video, user, message.message_id, postprocessing, part_of_playlist=True)
-    await message.edit_text(
-        str(format_add_playlist_status(playlist, user, postprocessing, "Done loading")),
-        parse_mode=ParseMode.HTML
-    )
+# @protect_from_telegram_flood_control(bot_config.connection_listener)
+# @protect_from_telegram_timeout
+# async def queue_playlist(context: UpdateHandlerContext, playlist: Playlist, user: User, query_message_id: int,
+#                          postprocessing: AudioProcessingSettings):
+#     message: Message = await context.send_message(
+#         str(format_add_playlist_status(playlist, user, postprocessing, "Loading")),
+#         parse_mode=ParseMode.HTML,
+#         reply_to_message_id=query_message_id
+#     )
+#     for video in playlist.videos:
+#         await queue_video(context, video, user, message.message_id, postprocessing, part_of_playlist=True)
+#     await message.edit_text(
+#         str(format_add_playlist_status(playlist, user, postprocessing, "Done loading")),
+#         parse_mode=ParseMode.HTML
+#     )
 
 
 @bot_config.add_command_handler(
@@ -354,23 +347,17 @@ async def enqueue(context: UpdateHandlerContext):
     user: User = context.update.effective_user
     query_message_id: int = context.update.message.message_id
 
-    query_text, postprocessing = await parse_query(context, query_message_id)
+    audio_source, postprocessing = await parse_query(context, query_message_id)
 
-    video: YouTube | None = find_video(query_text)
-    if video is not None:
-        await opinions.be_opinionated(video.title, context)
-        await queue_video(context, video, user, query_message_id, postprocessing)
+    if audio_source is not None:
+        await opinions.be_opinionated(audio_source.title, context)
+        await queue_video(context, audio_source, user, query_message_id, postprocessing)
     else:
-        playlist: Playlist | None = find_playlist(query_text)
-        if playlist is not None:
-            await opinions.be_opinionated(playlist.title, context)
-            await queue_playlist(context, playlist, user, query_message_id, postprocessing)
-        else:
-            await context.send_message(
-                "Couldn't find video or playlist",
-                parse_mode=ParseMode.HTML,
-                reply_to_message_id=query_message_id)
-            return
+        await context.send_message(
+            "Couldn't find video or playlist",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id)
+        return
 
 
 @bot_config.add_command_handler(

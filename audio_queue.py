@@ -10,7 +10,8 @@ from vlc import State as VLCState
 
 from async_queue import AsyncQueue
 from audio_processing import AudioProcessingSettings, ffmpeg_pitch_shift
-from pytubefix import YouTube, Stream
+
+from audio_sources import AudioSource
 from quiet_hours import is_quiet_hours
 from resource_handler import ResourceHandler
 from settings import Settings
@@ -20,7 +21,7 @@ from settings import Settings
 class AudioQueueElement:
     element_id: int
     resource: ResourceHandler.Resource
-    video: YouTube
+    audio_source: AudioSource
     processing: AudioProcessingSettings
     message_setter: Callable[[str, int], Coroutine[None, None, None]]
     path: Future[PathLike | None]
@@ -32,19 +33,14 @@ class AudioQueueElement:
     def freed(self) -> bool:
         return not self.resource.is_open
 
-    @staticmethod
-    def _download_audio(stream: Stream, resource_path: Path) -> Path:
-        out = Path(stream.download(mp3=True, output_path=str(resource_path)))
-        return out
-
     async def set_message(self, message: str, skippable: bool = True) -> None:
         await self.message_setter(message, self.element_id if skippable else None)
 
     async def download(self):
         try:
             await self.set_message("Downloading")
-            stream: Stream = self.video.streams.get_audio_only()
-            path: Path = await to_thread(self._download_audio, stream, self.resource.path)
+            path: Path = await self.audio_source.download(self.resource)
+            # path: Path = await to_thread(self.audio_source.download, self.resource)
             if self.processing.pitch_shift != 0:
                 await self.set_message("Processing")  # Can be removed if Telegram throttling is too bad
                 processed_path: Path = self.resource.path / "processed.mp3"
@@ -194,7 +190,8 @@ class AudioQueue(Iterable[AudioQueueElement]):
                 if element.skipped:
                     continue
                 self.current = element
-                path: PathLike = await element.path
+                path: Path | None = await element.path
+                print(f"Path: {path}\nPath type: {type(path)}")
                 if path is None:
                     assert element.skipped
                     self.current = None

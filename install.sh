@@ -13,7 +13,7 @@ source ./.venv/bin/activate
 
 pip install --upgrade pip
 pip install --upgrade certifi
-pip install "python-telegram-bot[all]" pytubefix python-vlc
+pip install "python-telegram-bot[all]" pytubefix python-vlc validators
 
 if { command -v brew 2>&1; } > /dev/null
 then
