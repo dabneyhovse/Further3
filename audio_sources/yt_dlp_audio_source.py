@@ -49,14 +49,11 @@ class YtDLPAudioSource(AudioSource):
                     self.metadata = ydl.extract_info(f"ytsearch:{search_query}", download=False)["entries"][0]
 
     async def download(self, resource: ResourceHandler.Resource) -> Path:
-        print("Starting download thread")
         result = await to_thread(self._download_thread, self.metadata, self.url, resource)
-        print("Ended download thread")
         return result
 
     @staticmethod
     def _download_thread(metadata: dict[str, Any], url: str, resource: ResourceHandler.Resource) -> Path:
-        print("Entered download thread")
         ydl_opts = {
             "format": "m4a/bestaudio/best",
             "outtmpl": str(resource.path / "%(uploader)s_%(title)s.%(ext)s"),
