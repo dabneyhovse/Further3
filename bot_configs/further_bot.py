@@ -257,13 +257,7 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int) -> \
                 query_text += " "
             query_text += arg
 
-    yt_dlp_query: yt_dlp_audio_source.Query
-    if validators.url(query_text):
-        yt_dlp_query = yt_dlp_audio_source.Query.URL(query_text)
-    else:
-        yt_dlp_query = yt_dlp_audio_source.Query.YTSearch(query_text)
-
-    return YtDLPAudioSource(yt_dlp_query), postprocessing
+    return YtDLPAudioSource(yt_dlp_audio_source.Query.from_query_text(query_text)), postprocessing
 
 
 async def queue_video(context: UpdateHandlerContext, audio_source: AudioSource, user: User, query_message_id: int,

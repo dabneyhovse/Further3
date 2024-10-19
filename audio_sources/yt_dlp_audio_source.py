@@ -7,6 +7,7 @@ from sys import stderr
 
 from typing import Callable, Any
 
+import validators
 from yt_dlp import YoutubeDL
 
 from audio_sources import AudioSource
@@ -17,8 +18,13 @@ from resource_handler import ResourceHandler
 class Query(metaclass=GADT):
     URL: Callable[[str], Query]
     YTSearch: Callable[[str], Query]
-    # DabneyVictory: YoutubeDLAudioSource.Query
-    # RealDabneyVictory: YoutubeDLAudioSource.Query
+
+    @staticmethod
+    def from_query_text(query_text: str) -> Query:
+        if validators.url(query_text):
+            return Query.URL(query_text)
+        else:
+            return Query.YTSearch(query_text)
 
 
 class YtDLPAudioSource(AudioSource):
