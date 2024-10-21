@@ -489,12 +489,12 @@ async def show_log(context: UpdateHandlerContext):
     stdout_result, stderr_result = (bytes_str.decode() for bytes_str in await proc.communicate())
     if stderr_result:
         await context.send_message(
-            f"<u>Error:</u>\n{html.escape(stderr_result)}\n",
+            f"<u>Error:</u><code>\n{html.escape(stderr_result)}</code>\n",
             parse_mode=ParseMode.HTML,
             reply_to_message_id=query_message_id
         )
     await context.send_message(
-        f"<u>Output:</u>\n{html.escape(stdout_result)}\n",
+        f"<u>Output:</u>\n<code>{html.escape(stdout_result)}</code>\n",
         parse_mode=ParseMode.HTML,
         reply_to_message_id=query_message_id
     )
