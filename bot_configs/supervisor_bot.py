@@ -481,7 +481,8 @@ async def show_log(context: UpdateHandlerContext):
     query_message_id = query_message.message_id
 
     proc: Process = await create_subprocess_shell(
-        f"journalctl --user -xeu further",
+        "journalctl --user -xeu further" if not context.args else
+        f"journalctl --user -xeu -n={int(context.args[0])} further",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
     )
@@ -492,12 +493,8 @@ async def show_log(context: UpdateHandlerContext):
             parse_mode=ParseMode.HTML,
             reply_to_message_id=query_message_id
         )
-    output_lines = stdout_result.splitlines()
-    if context.args:
-        output_lines = output_lines[:int(context.args[0])]
-    output_text = "\n".join(output_lines)
     await context.send_message(
-        f"<u>Output:</u>\n{html.escape(output_text)}\n",
+        f"<u>Output:</u>\n{html.escape(stdout_result)}\n",
         parse_mode=ParseMode.HTML,
         reply_to_message_id=query_message_id
     )
