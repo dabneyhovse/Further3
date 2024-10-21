@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import os
 import threading
 import time
@@ -461,3 +462,42 @@ async def intercept_further_execution(context: UpdateHandlerContext):
             parse_mode=ParseMode.HTML,
             reply_to_message_id=query_message_id
         )
+
+
+@bot_config.add_command_handler(
+    ["show_log", "log"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    permissions=UserSelector.And(
+        UserSelector.UserIDIsIn(Settings.comptroller_ids),
+        UserSelector.ChatTypeIsIn(ChatTypeFlag.DM)
+    ),
+    blocking=True
+)
+async def show_log(context: UpdateHandlerContext):
+    """Show the debug log
+    """
+
+    query_message: Message = context.message
+    query_message_id = query_message.message_id
+
+    proc: Process = await create_subprocess_shell(
+        f"journalctl --user -xeu further",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    stdout_result, stderr_result = (bytes_str.decode() for bytes_str in await proc.communicate())
+    if stderr_result:
+        await context.send_message(
+            f"<u>Error:</u>\n{html.escape(stderr_result)}\n",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id
+        )
+    output_lines = stdout_result.splitlines()
+    if context.args:
+        output_lines = output_lines[:int(context.args[0])]
+    output_text = "\n".join(output_lines)
+    await context.send_message(
+        f"<u>Output:</u>\n{html.escape(output_text)}\n",
+        parse_mode=ParseMode.HTML,
+        reply_to_message_id=query_message_id
+    )

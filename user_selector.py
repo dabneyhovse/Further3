@@ -52,7 +52,7 @@ class ChatTypeFlag(Flag):
             case ChatTypeFlag.INLINE_QUERY:
                 return "inline queries"
             case ChatTypeFlag.DM:
-                return "private chats"
+                return "private chats (DMs)"
             case ChatTypeFlag.GROUP:
                 return "group chats"
             case ChatTypeFlag.SUPERGROUP:
