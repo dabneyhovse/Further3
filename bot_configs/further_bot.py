@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from asyncio import Future
+from collections.abc import Callable, Coroutine
 from datetime import timedelta, datetime
 from math import log
 from typing import cast, Tuple
 
 import validators
 from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ChatMember, ChatFullInfo, \
-    ChatPermissions
+    ChatPermissions, Audio
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import filters
@@ -17,6 +18,7 @@ import opinions
 from audio_processing import AudioProcessingSettings
 from audio_queue import AudioQueue, AudioQueueElement
 from audio_sources import AudioSource, yt_dlp_audio_source
+from audio_sources.telegram_file_audio_source import TelegramAudioSource
 from audio_sources.yt_dlp_audio_source import YtDLPAudioSource
 from bot_config import BotConfig
 from flood_control_protection import protect_from_telegram_flood_control, protect_from_telegram_timeout
@@ -91,7 +93,7 @@ def format_get_queue(queue: AudioQueue) -> TreeMessage:
                     seconds=round(
                         sum(element.audio_source.duration for element in songs) +
                         (
-                            queue.current.audio_source.duration - queue.player.get_time() / 1000
+                            queue.current.audio_source.duration - timedelta(milliseconds=queue.player.get_time())
                             if queue.state in [AudioQueue.State.PLAYING, AudioQueue.State.PAUSED] else
                             0
                         )
@@ -131,7 +133,7 @@ def format_get_queue(queue: AudioQueue) -> TreeMessage:
 async def get_help(context: UpdateHandlerContext):
     """Show this help message
     (Only available in DMs to reduce clutter)"""
-    query_message_id: int = context.update.message.message_id
+    query_message_id: int = context.message.message_id
 
     await context.send_message(
         str(await bot_config.get_help(context)),
@@ -146,8 +148,8 @@ async def get_help(context: UpdateHandlerContext):
 )
 async def get_queue(context: UpdateHandlerContext):
     """Show the queue"""
-    query_message: Message = context.update.message
-    query_message_id = query_message.message_id
+    query_message: Message = context.message
+    query_message_id: int = query_message.message_id
     await context.send_message(
         str(format_get_queue(context.run_data.queue)),
         parse_mode=ParseMode.HTML,
@@ -172,7 +174,8 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int) -> \
 
     query_text: str = ""
     arg_text: str = ""
-    for arg in context.args:
+    for arg in context.args if context.args is not None else (
+            context.message.text or context.message.caption or "").split():
         if arg[-1] == '}':
             arg_text += arg[:-1].lstrip("{")
             match [sub_arg.strip().lower() for sub_arg in arg_text.split(":")]:
@@ -190,7 +193,7 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int) -> \
                     postprocessing.pitch_shift = shift
                 case ["contract" | "quicken" | "time contract" | "speed" | "time scale" | "scale time" |
                       "contract time" | "speed scale" | "tempo scale" | "tempo" | "scale tempo" | "tempo adjust" |
-                      "speed adjust" | "speed up", scale_str]:
+                      "speed adjust" | "speed up" | "playback speed" | "playback rate" | "playback tempo", scale_str]:
                     scale: float | None = await parse_float(scale_str, context, query_message_id)
                     if scale is None:
                         return
@@ -257,19 +260,22 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int) -> \
                 query_text += " "
             query_text += arg
 
-    return YtDLPAudioSource(yt_dlp_audio_source.Query.from_query_text(query_text)), postprocessing
+    query_message: Message = context.message
+    query_audio: Audio | None = query_message.audio
+
+    audio_source: AudioSource
+
+    if query_audio is None:
+        audio_source = YtDLPAudioSource(yt_dlp_audio_source.Query.from_query_text(query_text))
+    else:
+        audio_source = TelegramAudioSource(query_audio)
+
+    return audio_source, postprocessing
 
 
-async def queue_video(context: UpdateHandlerContext, audio_source: AudioSource, user: User, query_message_id: int,
-                      postprocessing: AudioProcessingSettings, part_of_playlist: bool = False):
-    message: Message = await context.send_message(
-        str(format_add_video_status(audio_source, user if not part_of_playlist else None, postprocessing,
-                                    "Downloading")),
-        parse_mode=ParseMode.HTML,
-        reply_to_message_id=query_message_id
-    )
-    download_resource = bot_config.resource_handler.claim()
-
+def generate_message_edit_status_callback(message: Message, audio_source: AudioSource, user: User,
+                                          part_of_playlist: bool, postprocessing: AudioProcessingSettings) -> \
+        Callable[[str, int | None], Coroutine[None, None, None]]:
     @protect_from_telegram_timeout
     @protect_from_telegram_flood_control(bot_config.connection_listener)
     async def message_edit_status(status: str, skip_index: int | None) -> None:
@@ -288,13 +294,29 @@ async def queue_video(context: UpdateHandlerContext, audio_source: AudioSource, 
             if not e.message.startswith("Message is not modified"):
                 raise
 
-    await message_edit_status("Adding to queue", None)
+    return message_edit_status
+
+
+async def queue_video(context: UpdateHandlerContext, audio_source: AudioSource, user: User, query_message_id: int,
+                      postprocessing: AudioProcessingSettings, part_of_playlist: bool = False):
+    message: Message = await context.send_message(
+        str(format_add_video_status(audio_source, user if not part_of_playlist else None, postprocessing,
+                                    "Downloading")),
+        parse_mode=ParseMode.HTML,
+        reply_to_message_id=query_message_id
+    )
+    download_resource = bot_config.resource_handler.claim()
+
+    message_edit_status_callback = generate_message_edit_status_callback(message, audio_source, user, part_of_playlist,
+                                                                         postprocessing)
+
+    await message_edit_status_callback("Adding to queue", None)
     queue_element: AudioQueueElement = AudioQueueElement(
         element_id=context.run_data.queue.get_id(),
         resource=download_resource,
         audio_source=audio_source,
         processing=postprocessing,
-        message_setter=message_edit_status,
+        message_setter=message_edit_status_callback,
         path=Future(),
         download_task=Future()
     )
@@ -318,6 +340,28 @@ async def queue_video(context: UpdateHandlerContext, audio_source: AudioSource, 
 #     )
 
 
+async def enqueue_impl(context: UpdateHandlerContext):
+    user: User = context.update.effective_user
+    query_message_id: int = context.message.message_id
+
+    parsed_query: tuple[AudioSource, AudioProcessingSettings] | None = await parse_query(context, query_message_id)
+
+    if parsed_query is None:
+        return
+
+    audio_source, postprocessing = parsed_query
+
+    if audio_source is not None:
+        await opinions.be_opinionated(audio_source.title, context)
+        await queue_video(context, audio_source, user, query_message_id, postprocessing)
+    else:
+        await context.send_message(
+            "Couldn't find video or playlist",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id)
+        return
+
+
 @bot_config.add_command_handler(
     ["q", "queue", "add", "enqueue"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
@@ -338,20 +382,7 @@ async def enqueue(context: UpdateHandlerContext):
     Pass the post-processing instructions individually, surrounded by braces, before the link / search term.
     For example: <code>/q {speed: 1.5} {pitch shift: 2} microchip song</code>
     """
-    user: User = context.update.effective_user
-    query_message_id: int = context.update.message.message_id
-
-    audio_source, postprocessing = await parse_query(context, query_message_id)
-
-    if audio_source is not None:
-        await opinions.be_opinionated(audio_source.title, context)
-        await queue_video(context, audio_source, user, query_message_id, postprocessing)
-    else:
-        await context.send_message(
-            "Couldn't find video or playlist",
-            parse_mode=ParseMode.HTML,
-            reply_to_message_id=query_message_id)
-        return
+    await enqueue_impl(context)
 
 
 @bot_config.add_command_handler(
@@ -362,7 +393,7 @@ async def enqueue(context: UpdateHandlerContext):
 )
 async def hampter(context: UpdateHandlerContext):
     """Hampter"""
-    query_message: Message = context.update.message
+    query_message: Message = context.message
 
     await context.run_data.queue.hampter()
     await query_message.set_reaction("👍")
@@ -387,7 +418,7 @@ async def callback_query_handler(context: UpdateHandlerContext):
 )
 async def pause(context: UpdateHandlerContext):
     """Pause playback"""
-    query_message: Message = context.update.message
+    query_message: Message = context.message
     await context.run_data.queue.pause()
     await query_message.set_reaction("👍")
 
@@ -400,7 +431,7 @@ async def pause(context: UpdateHandlerContext):
 )
 async def resume(context: UpdateHandlerContext):
     """Resume (unpause) playback"""
-    query_message: Message = context.update.message
+    query_message: Message = context.message
     await context.run_data.queue.resume()
     await query_message.set_reaction("👍")
 
@@ -413,7 +444,7 @@ async def resume(context: UpdateHandlerContext):
 )
 async def skip(context: UpdateHandlerContext):
     """Skip the currently playing (or paused) song"""
-    query_message: Message = context.update.message
+    query_message: Message = context.message
     user: User = context.update.effective_user
     result: bool = await context.run_data.queue.skip(user.name)
     await query_message.set_reaction("👍" if result else "🤷")
@@ -427,7 +458,7 @@ async def skip(context: UpdateHandlerContext):
 )
 async def skip_all(context: UpdateHandlerContext):
     """Skip all songs currently playing or in the queue"""
-    query_message: Message = context.update.message
+    query_message: Message = context.message
     user: User = context.update.effective_user
     await context.run_data.queue.skip_all(user.name)
     await query_message.set_reaction("👍")
@@ -446,7 +477,7 @@ async def set_volume(context: UpdateHandlerContext):
     Please do not set the volume above 100% without <i>very</i> good reason.
     """
 
-    query_message: Message = context.update.message
+    query_message: Message = context.message
     try:
         new_volume: float = float(context.args[0])
     except ValueError:
@@ -471,8 +502,8 @@ async def set_volume(context: UpdateHandlerContext):
 async def get_volume(context: UpdateHandlerContext):
     """Get the current (digital) output volume (in percent)"""
 
-    query_message: Message = context.update.message
-    query_message_id = query_message.message_id
+    query_message: Message = context.message
+    query_message_id: int = query_message.message_id
     await context.send_message(
         f"Current volume: {round(await context.run_data.queue.get_digital_volume())}",
         parse_mode=ParseMode.HTML,
@@ -486,7 +517,7 @@ async def get_volume(context: UpdateHandlerContext):
 #     permissions=UserSelector.ChatIDIsIn(Settings.registered_chat_ids)
 # )
 # async def set_sys_volume(context: UpdateHandlerContext):
-#     query_message: Message = context.update.message
+#     query_message: Message = context.message
 #     try:
 #         new_volume: float = float(context.args[0])
 #     except ValueError:
@@ -502,8 +533,8 @@ async def get_volume(context: UpdateHandlerContext):
 #     has_args=False
 # )
 # async def sys_volume(context: UpdateHandlerContext):
-#     query_message: Message = context.update.message
-#     query_message_id = query_message.message_id
+#     query_message: Message = context.message
+#     query_message_id: int = query_message.message_id
 #     await context.send_message(
 #         f"Current volume: {context.run_data.queue.get_sys_volume()}",
 #         parse_mode=ParseMode.HTML,
@@ -516,8 +547,8 @@ async def get_volume(context: UpdateHandlerContext):
 )
 async def get_quiet_hours(context: UpdateHandlerContext):
     """Get the currently configured quiet hours times"""
-    query_message: Message = context.update.message
-    query_message_id = query_message.message_id
+    query_message: Message = context.message
+    query_message_id: int = query_message.message_id
     await context.send_message(
         str(
             TreeMessage.Sequence([
@@ -545,8 +576,8 @@ async def get_quiet_hours(context: UpdateHandlerContext):
 )
 async def wee(context: UpdateHandlerContext):
     """HOO"""
-    query_message: Message = context.update.message
-    query_message_id = query_message.message_id
+    query_message: Message = context.message
+    query_message_id: int = query_message.message_id
     await context.send_message(
         f"/hoo",
         parse_mode=ParseMode.HTML,
@@ -560,8 +591,8 @@ async def wee(context: UpdateHandlerContext):
 )
 async def hoo(context: UpdateHandlerContext):
     """WEE"""
-    query_message: Message = context.update.message
-    query_message_id = query_message.message_id
+    query_message: Message = context.message
+    query_message_id: int = query_message.message_id
     await context.send_message(
         f"/wee",
         parse_mode=ParseMode.HTML,
@@ -578,8 +609,8 @@ async def hoo(context: UpdateHandlerContext):
     hide_from_help=True
 )
 async def send_registration_information(context: UpdateHandlerContext):
-    query_message: Message = context.update.message
-    query_message_id = query_message.message_id
+    query_message: Message = context.message
+    query_message_id: int = query_message.message_id
     user: User = context.update.effective_user
     print(
         f"Registration request received:\n"
@@ -602,8 +633,8 @@ async def send_registration_information(context: UpdateHandlerContext):
 )
 async def amogus(context: UpdateHandlerContext):
     """Instantly mutes @AlanTheTable for 6.9 minutes"""
-    query_message: Message = context.update.message
-    query_message_id = query_message.message_id
+    query_message: Message = context.message
+    query_message_id: int = query_message.message_id
 
     result: bool = await context.chat.restrict_member(
         Settings.amogus_ban_id,
@@ -630,7 +661,7 @@ async def amogus(context: UpdateHandlerContext):
 )
 async def sus(context: UpdateHandlerContext):
     """End @AlanTheTable's ban/mute :("""
-    query_message: Message = context.update.message
+    query_message: Message = context.message
 
     result: bool = await context.chat.unban_member(Settings.amogus_ban_id, only_if_banned=True)
     result |= await context.chat.restrict_member(
@@ -641,3 +672,11 @@ async def sus(context: UpdateHandlerContext):
         await query_message.set_reaction("👍")
     else:
         await query_message.delete()
+
+
+@bot_config.add_message_handler(
+    message_filter=filters.AUDIO
+)
+async def queue_audio_message(context: UpdateHandlerContext):
+    """Enqueue telegram audio"""
+    await enqueue_impl(context)

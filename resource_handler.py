@@ -11,6 +11,7 @@ class ResourceHandler:
             self.claimed: bool = True
             self.io_wrapper: TextIO | None = None
             self.is_open = True
+            self.path.mkdir()
 
         def open(self, *args, **kwargs) -> TextIO:
             if self.claimed:

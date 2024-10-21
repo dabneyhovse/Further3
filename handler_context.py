@@ -80,3 +80,7 @@ class UpdateHandlerContext(HandlerContext):
     @property
     async def chat_member(self) -> ChatMember:
         return await self.bot.get_chat_member(self.chat.id, self.user.id)
+
+    @property
+    def message(self) -> Message:
+        return self.update.message

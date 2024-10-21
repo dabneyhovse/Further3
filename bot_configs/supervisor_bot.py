@@ -59,7 +59,7 @@ async def get_help(context: UpdateHandlerContext):
     """Show this help message
     (Only available in DMs to reduce clutter)"""
 
-    query_message_id: int = context.update.message.message_id
+    query_message_id: int = context.message.message_id
 
     await context.send_message(
         str(await bot_config.get_help(context)),
@@ -86,7 +86,7 @@ async def complain(context: UpdateHandlerContext):
     If I don't respond, it is probably because I am busy, not because I haven't seen this.
     """
 
-    query_message: Message = context.update.message
+    query_message: Message = context.message
     query_message_id = query_message.message_id
 
     context.bot_data.defaults.last_complaint_time = 0
@@ -131,7 +131,7 @@ async def complain(context: UpdateHandlerContext):
 async def reset_complain(context: UpdateHandlerContext):
     """Reset the complaint anti-spam timeout"""
 
-    query_message: Message = context.update.message
+    query_message: Message = context.message
 
     context.bot_data.last_complaint_time = time.time() + ((float(context.args[0]) if context.args else 0) - 5) * 60
 
@@ -241,7 +241,7 @@ async def try_to_start_further(context: HandlerContext):
 async def start_further(context: UpdateHandlerContext):
     """Start @DabneyFurtherBot bot"""
 
-    query_message: Message = context.update.message
+    query_message: Message = context.message
     query_message_id = query_message.message_id
 
     if not await try_to_start_further(context):
@@ -267,7 +267,7 @@ async def start_further(context: UpdateHandlerContext):
 async def stop_further(context: UpdateHandlerContext):
     """Attempt to gracefully stop @DabneyFurtherBot bot"""
 
-    query_message: Message = context.update.message
+    query_message: Message = context.message
     query_message_id = query_message.message_id
 
     if context.run_data.further_process is None or not context.run_data.further_process.is_alive():
@@ -299,7 +299,7 @@ async def stop_further(context: UpdateHandlerContext):
 async def stop_process(context: UpdateHandlerContext):
     """Attempt to stop the Further and Further Supervisor server process"""
 
-    query_message: Message = context.update.message
+    query_message: Message = context.message
     query_message_id = query_message.message_id
 
     allow_stop_further: bool = False
@@ -363,7 +363,7 @@ async def update_further(context: UpdateHandlerContext):
     Pulls from the git repository. Restart required afterwords.
     """
 
-    query_message: Message = context.update.message
+    query_message: Message = context.message
     query_message_id = query_message.message_id
 
     update_message: Message = await context.send_message(
@@ -403,7 +403,7 @@ async def intercept_further_execution(context: UpdateHandlerContext):
     Please don't run this command if you don't have access to the running process on the server.
     """
 
-    query_message: Message = context.update.message
+    query_message: Message = context.message
     query_message_id = query_message.message_id
 
     if context.run_data.further_process is None or not context.run_data.further_process.is_alive():
@@ -429,7 +429,7 @@ async def intercept_further_execution(context: UpdateHandlerContext):
     Please don't run this command if you don't have access to the running process on the server.
     """
 
-    query_message: Message = context.update.message
+    query_message: Message = context.message
     query_message_id = query_message.message_id
 
     if context.run_data.further_process is None or not context.run_data.further_process.is_alive():

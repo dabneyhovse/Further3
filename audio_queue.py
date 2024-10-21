@@ -191,7 +191,6 @@ class AudioQueue(Iterable[AudioQueueElement]):
                     continue
                 self.current = element
                 path: Path | None = await element.path
-                print(f"Path: {path}\nPath type: {type(path)}")
                 if path is None:
                     assert element.skipped
                     self.current = None

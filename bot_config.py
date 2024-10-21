@@ -136,6 +136,8 @@ class BotConfig:
 
         self.handlers.append(CommandHandler(name, f, filters=filters, has_args=has_args, block=blocking))
 
+        return f
+
     @method_decorator(compose(arg_decorator, map_first_arg_decorator(map_all_args_decorator(UpdateHandlerContext))))
     def add_message_handler(self, f, message_filter: BaseFilter | None, blocking: bool = True):
         self.handlers.append(MessageHandler(message_filter, f, block=blocking))
