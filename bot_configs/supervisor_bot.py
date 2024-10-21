@@ -482,7 +482,7 @@ async def show_log(context: UpdateHandlerContext):
 
     proc: Process = await create_subprocess_shell(
         "journalctl --user -xeu further" if not context.args else
-        f"journalctl --user -xeu -n={int(context.args[0])} further",
+        f"journalctl --user -n {int(context.args[0])} -xeu further",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
     )
