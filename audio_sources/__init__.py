@@ -22,3 +22,7 @@ class AudioSource(ABC):
     @property
     @abstractmethod
     def author_and_author_type(self) -> tuple[str, str]: ...
+
+    @property
+    @abstractmethod
+    def url(self) -> str | None: ...

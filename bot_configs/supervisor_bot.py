@@ -12,7 +12,7 @@ from multiprocessing import Process, Pipe
 from multiprocessing.connection import Connection  # noqa
 from sys import stderr
 
-from telegram import Message, Bot, ChatFullInfo
+from telegram import Message, Bot, ChatFullInfo, LinkPreviewOptions
 from telegram.constants import ParseMode
 from telegram.ext import filters
 
@@ -464,37 +464,86 @@ async def intercept_further_execution(context: UpdateHandlerContext):
         )
 
 
-@bot_config.add_command_handler(
-    ["show_log", "log"],
-    filters=~filters.UpdateType.EDITED_MESSAGE,
-    permissions=UserSelector.And(
-        UserSelector.UserIDIsIn(Settings.comptroller_ids),
-        UserSelector.ChatTypeIsIn(ChatTypeFlag.DM)
-    ),
-    blocking=True
-)
-async def show_log(context: UpdateHandlerContext):
-    """Show the debug log
-    """
-
-    query_message: Message = context.message
-    query_message_id = query_message.message_id
-
-    proc: Process = await create_subprocess_shell(
-        "journalctl --user -xeu further" if not context.args else
-        f"journalctl --user -n {int(context.args[0])} -xeu further",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
-    stdout_result, stderr_result = (bytes_str.decode() for bytes_str in await proc.communicate())
-    if stderr_result:
-        await context.send_message(
-            f"<u>Error:</u>\n<pre>{html.escape(stderr_result)}</pre>\n",
-            parse_mode=ParseMode.HTML,
-            reply_to_message_id=query_message_id
-        )
-    await context.send_message(
-        f"<u>Output:</u>\n<pre>{html.escape(stdout_result)}</pre>\n",
-        parse_mode=ParseMode.HTML,
-        reply_to_message_id=query_message_id
-    )
+# class Log:
+#     def __init__(self, log_message: Message):
+#         self.log_message: Message = log_message
+#         self.lines: list[str] = []
+#         self.position: int = 0
+#         self.length: int = 8
+#
+#     async def refresh(self, context: UpdateHandlerContext):
+#         query_message: Message = context.message
+#         query_message_id = query_message.message_id
+#
+#         proc: Process = await create_subprocess_shell(
+#             f"journalctl --user --no-tail -xu further",
+#             stdout=subprocess.PIPE,
+#             stderr=subprocess.PIPE
+#         )
+#         stdout_result, stderr_result = (bytes_str.decode() for bytes_str in await proc.communicate())
+#         if stderr_result:
+#             await context.send_message(
+#                 f"<u>Error:</u>\n<pre>{html.escape(stderr_result)}</pre>\n",
+#                 parse_mode=ParseMode.HTML,
+#                 reply_to_message_id=query_message_id
+#             )
+#         self.lines = stdout_result.splitlines()
+#
+#     def get_log_text(self):
+#         return "\n".join(self.lines[len(self.lines) - self.position - self.length: len(self.lines) - self.position])
+#
+#     async def update(self):
+#         await self.log_message.edit_text(
+#             html.escape(self.get_log_text()),
+#             parse_mode=ParseMode.HTML,
+#             link_preview_options=LinkPreviewOptions(is_disabled=True)
+#         )
+#
+#
+# @bot_config.add_command_handler(
+#     ["start_log", "log"],
+#     filters=~filters.UpdateType.EDITED_MESSAGE,
+#     permissions=UserSelector.And(
+#         UserSelector.UserIDIsIn(Settings.comptroller_ids),
+#         UserSelector.ChatTypeIsIn(ChatTypeFlag.DM)
+#     ),
+#     has_args=False,
+#     blocking=True
+# )
+# async def start_log(context: UpdateHandlerContext):
+#     """Show the debug log"""
+#     query_message: Message = context.message
+#     query_message_id = query_message.message_id
+#
+#     context.user_data.log = Log(await context.send_message(
+#         html.escape("<Log started>"),
+#         parse_mode=ParseMode.HTML,
+#         reply_to_message_id=query_message_id
+#     ))
+#
+#
+# @bot_config.add_command_handler(
+#     ["log_len", "len"],
+#     filters=~filters.UpdateType.EDITED_MESSAGE,
+#     permissions=UserSelector.And(
+#         UserSelector.UserIDIsIn(Settings.comptroller_ids),
+#         UserSelector.ChatTypeIsIn(ChatTypeFlag.DM)
+#     ),
+#     has_args=1,
+#     blocking=True
+# )
+# async def log_len(context: UpdateHandlerContext):
+#     """Show the debug log"""
+#     query_message: Message = context.message
+#     query_message_id = query_message.message_id
+#
+#     context.user_data.defaults.log = None
+#     if context.user_data.log is None:
+#         await context.send_message(
+#             html.escape("No log open"),
+#             parse_mode=ParseMode.HTML,
+#             reply_to_message_id=query_message_id
+#         )
+#         return
+#
+#     context.user_data.log.length = int(context.args[0])

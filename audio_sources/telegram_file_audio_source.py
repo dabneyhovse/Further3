@@ -35,3 +35,7 @@ class TelegramAudioSource(AudioSource):
     @property
     def duration(self) -> timedelta:
         return timedelta(seconds=self.telegram_audio.duration)
+
+    @property
+    def url(self) -> None:
+        return

@@ -8,7 +8,7 @@ from typing import cast, Tuple
 
 import validators
 from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ChatMember, ChatFullInfo, \
-    ChatPermissions, Audio
+    ChatPermissions, Audio, LinkPreviewOptions
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import filters
@@ -58,7 +58,9 @@ def format_add_video_status(audio_source: AudioSource, user: User | None,
         TreeMessage.Named("Queued by", TreeMessage.Text(user.name)) if user is not None else TreeMessage.Skip,
         TreeMessage.Named(
             "Duration",
-            TreeMessage.Text(str(audio_source.duration))
+            TreeMessage.Text(
+                str(timedelta(seconds=round((audio_source.duration / postprocessing.tempo_scale).seconds)))
+            )
             if not postprocessing.loop else
             TreeMessage.Text("∞")
         ),
@@ -91,9 +93,10 @@ def format_get_queue(queue: AudioQueue) -> TreeMessage:
                 "Remaining play time",
                 TreeMessage.Text(str(timedelta(
                     seconds=round(
-                        sum(element.audio_source.duration for element in songs) +
+                        sum(element.duration.seconds for element in songs) +
                         (
-                            queue.current.audio_source.duration - timedelta(milliseconds=queue.player.get_time())
+                            queue.current.duration.seconds -
+                            queue.player.get_time() / queue.current.processing.tempo_scale / 1000
                             if queue.state in [AudioQueue.State.PLAYING, AudioQueue.State.PAUSED] else
                             0
                         )
@@ -275,10 +278,10 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int) -> \
 
 def generate_message_edit_status_callback(message: Message, audio_source: AudioSource, user: User,
                                           part_of_playlist: bool, postprocessing: AudioProcessingSettings) -> \
-        Callable[[str, int | None], Coroutine[None, None, None]]:
+        Callable[[str, int | None, str | None], Coroutine[None, None, None]]:
     @protect_from_telegram_timeout
     @protect_from_telegram_flood_control(bot_config.connection_listener)
-    async def message_edit_status(status: str, skip_index: int | None) -> None:
+    async def message_edit_status(status: str, skip_index: int | None, url: str | None = None) -> None:
         keyboard = [
             [InlineKeyboardButton("Skip", callback_data=("skip_button", skip_index))]
         ]
@@ -288,7 +291,13 @@ def generate_message_edit_status_callback(message: Message, audio_source: AudioS
                 str(format_add_video_status(audio_source, user if not part_of_playlist else None, postprocessing,
                                             status)),
                 parse_mode=ParseMode.HTML,
-                reply_markup=(reply_markup if skip_index is not None else None)
+                reply_markup=(reply_markup if skip_index is not None else None),
+                link_preview_options=LinkPreviewOptions(
+                    is_disabled=(url is None),
+                    url=url,
+                    prefer_small_media=True,
+                    show_above_text=False
+                )
             )
         except BadRequest as e:
             if not e.message.startswith("Message is not modified"):

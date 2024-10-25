@@ -1,6 +1,7 @@
 from asyncio import sleep, get_event_loop, Future, CancelledError, Task, to_thread, TaskGroup
 from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import Enum
 from os import PathLike
 from pathlib import Path
@@ -23,7 +24,7 @@ class AudioQueueElement:
     resource: ResourceHandler.Resource
     audio_source: AudioSource
     processing: AudioProcessingSettings
-    message_setter: Callable[[str, int], Coroutine[None, None, None]]
+    message_setter: Callable[[str, int, str | None], Coroutine[None, None, None]]
     path: Future[PathLike | None]
     download_task: Future[Task]
     active: bool = False
@@ -33,8 +34,8 @@ class AudioQueueElement:
     def freed(self) -> bool:
         return not self.resource.is_open
 
-    async def set_message(self, message: str, skippable: bool = True) -> None:
-        await self.message_setter(message, self.element_id if skippable else None)
+    async def set_message(self, message: str, skippable: bool = True, url: str | None = None) -> None:
+        await self.message_setter(message, self.element_id if skippable else None, url)
 
     async def download(self):
         try:
@@ -46,7 +47,7 @@ class AudioQueueElement:
                 processed_path: Path = self.resource.path / "processed.mp3"
                 await ffmpeg_pitch_shift(self.processing.pitch_scale, path, processed_path)
                 path = processed_path
-            await self.set_message("Queued")
+            await self.set_message("Queued", self.audio_source.url)
             self.path.set_result(path)
         except CancelledError:
             assert self.skipped
@@ -70,6 +71,10 @@ class AudioQueueElement:
         self.active = False
         if not self.skipped:
             await self.set_message(f"Played", skippable=False)
+
+    @property
+    def duration(self) -> timedelta:
+        return self.audio_source.duration / self.processing.tempo_scale
 
 
 class AudioQueue(Iterable[AudioQueueElement]):
