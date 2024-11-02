@@ -63,13 +63,15 @@ async def process_audio(source_path: Path, dest_path: Path,
     vlc_settings = VLCModificationSettings()
 
     stream: Stream = ffmpeg.input(source_path)
+    if settings.tempo_scale < 0:
+        stream = stream.filter("areverse")
     if settings.pitch_shift:
         frame_rate: int = 44100
         stream = stream.filter("asetrate", frame_rate * settings.pitch_scale)
         stream = stream.filter("aresample", frame_rate)
-        stream = stream.filter("atempo", settings.tempo_scale / settings.pitch_scale)
+        stream = stream.filter("atempo", abs(settings.tempo_scale) / settings.pitch_scale)
     else:
-        vlc_settings.tempo_scale = settings.tempo_scale
+        vlc_settings.tempo_scale = abs(settings.tempo_scale)
     if settings.echo:
         stream = stream.filter("aecho", *echo_args(
             0.6,

@@ -192,9 +192,9 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int) -> \
                     scale: float | None = await parse_float(scale_str, context, query_message_id)
                     if scale is None:
                         return
-                    if not 1 / 4 <= scale <= 4:
+                    if not 1 / 4 <= abs(scale) <= 4:
                         await context.send_message(
-                            f"Time scale should be in the range [{1 / 4}, 4]",
+                            f"Time scale (absolute value) should be in the range [{1 / 4}, 4]",
                             parse_mode=ParseMode.HTML,
                             reply_to_message_id=query_message_id)
                         return
@@ -204,9 +204,9 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int) -> \
                     inv_scale: float | None = await parse_float(inv_scale_str, context, query_message_id)
                     if inv_scale is None:
                         return
-                    if not 1 / 4 <= inv_scale <= 4:
+                    if not 1 / 4 <= abs(inv_scale) <= 4:
                         await context.send_message(
-                            f"Time stretch should be in the range [{1 / 4}, 4]",
+                            f"Time stretch (absolute value) should be in the range [{1 / 4}, 4]",
                             parse_mode=ParseMode.HTML,
                             reply_to_message_id=query_message_id)
                         return
