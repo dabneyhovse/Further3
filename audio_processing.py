@@ -1,14 +1,9 @@
-from asyncio import create_subprocess_shell, subprocess, to_thread
+from asyncio import to_thread
 from dataclasses import dataclass
 from pathlib import Path
-from sys import stderr
 
 import ffmpeg
-from ffmpeg import Stream
-from ffmpeg.nodes import FilterableStream
-
-from settings import Settings
-from util import escape_str
+from ffmpeg.nodes import Stream
 
 
 @dataclass
@@ -16,12 +11,14 @@ class AudioProcessingSettings:
     pitch_shift: float = 0
     tempo_scale: float = 1
     percussive_harmonic_balance: float = 0
-    echo: tuple[float, float, float] = (0, 0, 0)
+    echo: bool = False
+    metal: bool = False
+    reverb: bool = False
     loop: bool = False
 
     def __bool__(self) -> bool:
         return (self.pitch_shift != 0 or self.tempo_scale != 1 or self.percussive_harmonic_balance != 0 or
-                any(self.echo) or self.loop)
+                self.echo or self.metal or self.reverb or self.loop)
 
     def __str__(self) -> str:
         out: str = "In"
@@ -35,8 +32,12 @@ class AudioProcessingSettings:
             out += f" \u2192 Pitch-Shift = {self.pitch_shift:.2f}"
         if self.tempo_scale != 1:
             out += f" \u2192 Speed = {self.tempo_scale:.2f}"
-        if all(self.echo):
-            out += f" \u2192 Echo (power, distance, cos) = {self.echo:.2f}"
+        if self.echo:
+            out += f" \u2192 Echo = {self.echo:.2f}"
+        if self.metal:
+            out += f" \u2192 Metal = {self.metal:.2f}"
+        if self.reverb:
+            out += f" \u2192 Reverb = {self.reverb:.2f}"
         if self.loop:
             out += f" \u2192 Loop forever"
         out += " \u2192 Out"
@@ -52,11 +53,16 @@ class VLCModificationSettings:
     tempo_scale: float = 1
 
 
+def echo_args(in_gain: float, out_gain: float, delays: list[float], decays: list[float]) -> \
+        tuple[float, float, str, str]:
+    return in_gain, out_gain, "|".join(str(delay) for delay in delays), "|".join(str(decay) for decay in decays)
+
+
 async def process_audio(source_path: Path, dest_path: Path,
                         settings: AudioProcessingSettings) -> VLCModificationSettings:
     vlc_settings = VLCModificationSettings()
 
-    stream: FilterableStream = ffmpeg.input(source_path)
+    stream: Stream = ffmpeg.input(source_path)
     if settings.pitch_shift:
         frame_rate: int = 44100
         stream = stream.filter("asetrate", frame_rate * settings.pitch_scale)
@@ -64,6 +70,22 @@ async def process_audio(source_path: Path, dest_path: Path,
         stream = stream.filter("atempo", settings.tempo_scale / settings.pitch_scale)
     else:
         vlc_settings.tempo_scale = settings.tempo_scale
+    if settings.echo:
+        stream = stream.filter("aecho", *echo_args(
+            0.6,
+            0.3,
+            [100 * i for i in range(1, 4)],
+            [0.5 ** i for i in range(1, 4)]
+        ))
+    if settings.metal:
+        stream = stream.filter("aecho", *echo_args(0.8, 0.88, [20, 40], [0.8, 0.4]))
+    if settings.reverb:
+        stream = stream.filter("aecho", *echo_args(
+            0.8,
+            0.88,
+            [8 * i for i in range(1, 32)],
+            [0.95 ** i for i in range(1, 32)]
+        ))
     stream = stream.output(str(dest_path))
     await to_thread(stream.run)
 

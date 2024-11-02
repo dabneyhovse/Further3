@@ -1,7 +1,6 @@
 from asyncio import sleep, get_event_loop, Future, CancelledError, Task, TaskGroup
 from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
-from datetime import timedelta
 from enum import Enum
 from os import PathLike
 from pathlib import Path

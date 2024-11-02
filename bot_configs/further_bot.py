@@ -211,33 +211,39 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int) -> \
                             reply_to_message_id=query_message_id)
                         return
                     postprocessing.tempo_scale = 1 / inv_scale
-                case ["increase percussion" | "percussion" | "decrease melody" | "percussion balance", balance_str]:
-                    balance: float | None = await parse_float(balance_str, context, query_message_id)
-                    if balance is None:
-                        return
-                    if not -1 <= balance <= 1:
-                        await context.send_message(
-                            f"Percussive / harmonic balance should be in the range [-1, 1]",
-                            parse_mode=ParseMode.HTML,
-                            reply_to_message_id=query_message_id)
-                        return
-                    postprocessing.percussive_harmonic_balance = balance
-                case ["increase melody" | "melody" | "decrease percussion" | "melody balance", balance_str]:
-                    balance: float | None = await parse_float(balance_str, context, query_message_id)
-                    if balance is None:
-                        return
-                    if not -1 <= balance <= 1:
-                        await context.send_message(
-                            f"Percussive / harmonic balance should be in the range [-1, 1]",
-                            parse_mode=ParseMode.HTML,
-                            reply_to_message_id=query_message_id)
-                        return
-                    postprocessing.percussive_harmonic_balance = -balance
+                # case ["increase percussion" | "percussion" | "decrease melody" | "percussion balance", balance_str]:
+                #     balance: float | None = await parse_float(balance_str, context, query_message_id)
+                #     if balance is None:
+                #         return
+                #     if not -1 <= balance <= 1:
+                #         await context.send_message(
+                #             f"Percussive / harmonic balance should be in the range [-1, 1]",
+                #             parse_mode=ParseMode.HTML,
+                #             reply_to_message_id=query_message_id)
+                #         return
+                #     postprocessing.percussive_harmonic_balance = balance
+                # case ["increase melody" | "melody" | "decrease percussion" | "melody balance", balance_str]:
+                #     balance: float | None = await parse_float(balance_str, context, query_message_id)
+                #     if balance is None:
+                #         return
+                #     if not -1 <= balance <= 1:
+                #         await context.send_message(
+                #             f"Percussive / harmonic balance should be in the range [-1, 1]",
+                #             parse_mode=ParseMode.HTML,
+                #             reply_to_message_id=query_message_id)
+                #         return
+                #     postprocessing.percussive_harmonic_balance = -balance
                 case ["nightcore" | "night-core" | "sped up" | "sped-up"]:
                     postprocessing.pitch_shift = 12 * log(1.35) / log(2)
                     postprocessing.tempo_scale = 1.35
-                case ["loop" | "repeat"] | ["loop" "forever"]:
+                case ["loop" | "repeat"] | ["loop", "forever"]:
                     postprocessing.loop = True
+                case ["echo"]:
+                    postprocessing.echo = True
+                case ["metal"]:
+                    postprocessing.metal = True
+                case ["reverb"]:
+                    postprocessing.reverb = True
                 case _:
                     await context.send_message(
                         f"Unknown postprocessing command: {arg_text}",
@@ -380,6 +386,9 @@ async def enqueue(context: UpdateHandlerContext):
     - "pitch shift" / "pitch adjust" / "freq shift" / etc.: shift the play-back pitch by a number of semitones
     - "speed" / "time contract" / "tempo" / etc.: scale the play-back tempo
     - "nightcore" ≈ (pitch shift: 5.12, speed: 1.35)
+    - "echo"
+    - "metal"
+    - "reverb"
     Pass the post-processing instructions individually, surrounded by braces, before the link / search term.
     For example: <code>/q {speed: 1.5} {pitch shift: 2} microchip song</code>
     """
