@@ -21,6 +21,7 @@ from audio_sources import AudioSource, yt_dlp_audio_source
 from audio_sources.telegram_file_audio_source import TelegramAudioSource
 from audio_sources.yt_dlp_audio_source import YtDLPAudioSource
 from bot_config import BotConfig
+from duration import Duration
 from flood_control_protection import protect_from_telegram_flood_control, protect_from_telegram_timeout
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
 from settings import Settings
@@ -56,14 +57,7 @@ def format_add_video_status(audio_source: AudioSource, user: User | None,
             TreeMessage.InlineCode(audio_source.author_and_author_type[1])
         ),
         TreeMessage.Named("Queued by", TreeMessage.Text(user.name)) if user is not None else TreeMessage.Skip,
-        TreeMessage.Named(
-            "Duration",
-            TreeMessage.Text(
-                str(timedelta(seconds=round((audio_source.duration / postprocessing.tempo_scale).seconds)))
-            )
-            if not postprocessing.loop else
-            TreeMessage.Text("∞")
-        ),
+        TreeMessage.Named("Duration", TreeMessage.Text(str(audio_source.duration))),
         TreeMessage.Named("Post-processing", TreeMessage.Text(str(postprocessing)))
         if postprocessing else TreeMessage.Skip,
         TreeMessage.Named("Status", TreeMessage.Text(status)) if status is not None else TreeMessage.Skip
@@ -91,19 +85,17 @@ def format_get_queue(queue: AudioQueue) -> TreeMessage:
             TreeMessage.Named("Songs", TreeMessage.Text(str(len(songs)))),
             TreeMessage.Named(
                 "Remaining play time",
-                TreeMessage.Text(str(timedelta(
-                    seconds=round(
-                        sum(element.duration.seconds for element in songs) +
-                        (
-                            queue.current.duration.seconds -
-                            queue.player.get_time() / queue.current.processing.tempo_scale / 1000
-                            if queue.state in [AudioQueue.State.PLAYING, AudioQueue.State.PAUSED] else
-                            0
-                        )
+                TreeMessage.Text(str(
+                    sum((element.duration for element in songs), start=Duration.zero()) + (
+                            queue.current.duration -
+                            Duration.from_timedelta(
+                                timedelta(milliseconds=queue.player.get_time())
+                                if queue.state in [AudioQueue.State.PLAYING, AudioQueue.State.PAUSED] else
+                                timedelta()
+                            ) / queue.current.processing.tempo_scale
                     )
-                )))
-                if not any(element.processing.loop for element in songs) else
-                TreeMessage.Text("∞")
+                )
+                )
             )
         ]),
         TreeMessage.Named(

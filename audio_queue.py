@@ -1,4 +1,4 @@
-from asyncio import sleep, get_event_loop, Future, CancelledError, Task, to_thread, TaskGroup
+from asyncio import sleep, get_event_loop, Future, CancelledError, Task, TaskGroup
 from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
 from datetime import timedelta
@@ -10,9 +10,9 @@ from vlc import Instance, MediaPlayer, Media
 from vlc import State as VLCState
 
 from async_queue import AsyncQueue
-from audio_processing import AudioProcessingSettings, ffmpeg_pitch_shift
-
+from audio_processing import AudioProcessingSettings, process_audio, VLCModificationSettings
 from audio_sources import AudioSource
+from duration import Duration
 from quiet_hours import is_quiet_hours
 from resource_handler import ResourceHandler
 from settings import Settings
@@ -29,25 +29,28 @@ class AudioQueueElement:
     download_task: Future[Task]
     active: bool = False
     skipped: bool = False
+    vlc_settings: VLCModificationSettings | None = None
 
     @property
     def freed(self) -> bool:
         return not self.resource.is_open
 
-    async def set_message(self, message: str, skippable: bool = True, url: str | None = None) -> None:
-        await self.message_setter(message, self.element_id if skippable else None, url)
+    async def set_message(self, message: str, skippable: bool = True) -> None:
+        await self.message_setter(message, self.element_id if skippable else None, self.audio_source.url)
 
     async def download(self):
         try:
             await self.set_message("Downloading")
             path: Path = await self.audio_source.download(self.resource)
             # path: Path = await to_thread(self.audio_source.download, self.resource)
-            if self.processing.pitch_shift != 0:
+            if self.processing:
                 await self.set_message("Processing")  # Can be removed if Telegram throttling is too bad
                 processed_path: Path = self.resource.path / "processed.mp3"
-                await ffmpeg_pitch_shift(self.processing.pitch_scale, path, processed_path)
+                self.vlc_settings = await process_audio(path, processed_path, self.processing)
                 path = processed_path
-            await self.set_message("Queued", self.audio_source.url)
+            else:
+                self.vlc_settings = VLCModificationSettings()
+            await self.set_message("Queued", True)
             self.path.set_result(path)
         except CancelledError:
             assert self.skipped
@@ -73,7 +76,7 @@ class AudioQueueElement:
             await self.set_message(f"Played", skippable=False)
 
     @property
-    def duration(self) -> timedelta:
+    def duration(self) -> Duration:
         return self.audio_source.duration / self.processing.tempo_scale
 
 
@@ -209,7 +212,7 @@ class AudioQueue(Iterable[AudioQueueElement]):
                     media: Media = self.instance.media_new_path(path)
                     self.player.set_media(media)
 
-                    self.player.set_rate(element.processing.tempo_scale)
+                    self.player.set_rate(element.vlc_settings.tempo_scale)
 
                     await element.set_message("Playing")
 

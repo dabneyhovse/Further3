@@ -6,6 +6,7 @@ from pathlib import Path
 from telegram import Audio, File
 
 from audio_sources import AudioSource
+from duration import Duration
 from resource_handler import ResourceHandler
 
 
@@ -33,8 +34,8 @@ class TelegramAudioSource(AudioSource):
         return "performer", self.telegram_audio.performer or "&lt;Unknown&gt;"
 
     @property
-    def duration(self) -> timedelta:
-        return timedelta(seconds=self.telegram_audio.duration)
+    def duration(self) -> Duration:
+        return Duration.from_timedelta(timedelta(seconds=self.telegram_audio.duration))
 
     @property
     def url(self) -> None:

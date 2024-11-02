@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from datetime import timedelta
 from pathlib import Path
 
+from duration import Duration
 from resource_handler import ResourceHandler
 
 
@@ -17,7 +18,7 @@ class AudioSource(ABC):
 
     @property
     @abstractmethod
-    def duration(self) -> timedelta: ...
+    def duration(self) -> Duration: ...
 
     @property
     @abstractmethod

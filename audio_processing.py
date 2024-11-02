@@ -1,8 +1,11 @@
-from asyncio import create_subprocess_shell, subprocess
-from asyncio.subprocess import Process
+from asyncio import create_subprocess_shell, subprocess, to_thread
 from dataclasses import dataclass
 from pathlib import Path
 from sys import stderr
+
+import ffmpeg
+from ffmpeg import Stream
+from ffmpeg.nodes import FilterableStream
 
 from settings import Settings
 from util import escape_str
@@ -44,15 +47,24 @@ class AudioProcessingSettings:
         return 2 ** (self.pitch_shift / 12)
 
 
-async def ffmpeg_pitch_shift(scale: float, source_path: Path, dest_path: Path):
-    clean_source: str = escape_str(source_path.absolute().as_posix(), "\"")
-    clean_dest: str = escape_str(dest_path.absolute().as_posix(), "\"")
-    proc: Process = await create_subprocess_shell(
-        f"ffmpeg -i \"{clean_source}\" -af asetrate=44100*{scale},aresample=44100,atempo=1/{scale} \"{clean_dest}\"",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
-    stdout_result, stderr_result = (bytes_str.decode() for bytes_str in await proc.communicate())
-    if Settings.debug and stderr_result:
-        print(f"FFMPEG STDErr:\n{stderr_result}\n", file=stderr)
-        print(f"FFMPEG STDOut:\n{stdout_result}\n", file=stderr)
+@dataclass
+class VLCModificationSettings:
+    tempo_scale: float = 1
+
+
+async def process_audio(source_path: Path, dest_path: Path,
+                        settings: AudioProcessingSettings) -> VLCModificationSettings:
+    vlc_settings = VLCModificationSettings()
+
+    stream: FilterableStream = ffmpeg.input(source_path)
+    if settings.pitch_shift:
+        frame_rate: int = 44100
+        stream = stream.filter("asetrate", frame_rate * settings.pitch_scale)
+        stream = stream.filter("aresample", frame_rate)
+        stream = stream.filter("atempo", settings.tempo_scale / settings.pitch_scale)
+    else:
+        vlc_settings.tempo_scale = settings.tempo_scale
+    stream = stream.output(str(dest_path))
+    await to_thread(stream.run)
+
+    return vlc_settings
