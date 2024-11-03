@@ -87,12 +87,15 @@ def format_get_queue(queue: AudioQueue) -> TreeMessage:
                 "Remaining play time",
                 TreeMessage.Text(str(
                     sum((element.duration for element in songs), start=Duration.zero()) + (
-                            queue.current.duration -
-                            Duration.from_timedelta(
-                                timedelta(milliseconds=queue.player.get_time())
-                                if queue.state in [AudioQueue.State.PLAYING, AudioQueue.State.PAUSED] else
-                                timedelta()
-                            ) / queue.current.processing.tempo_scale
+                        (
+                                queue.current.duration -
+                                Duration.from_timedelta(
+                                    timedelta(milliseconds=queue.player.get_time())
+                                ) / queue.current.processing.tempo_scale
+                        )
+                        if queue.state in [AudioQueue.State.PLAYING, AudioQueue.State.PAUSED] else
+                        Duration.zero()
+
                     )
                 )
                 )
