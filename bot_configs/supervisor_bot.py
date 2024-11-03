@@ -374,7 +374,7 @@ async def update_further(context: UpdateHandlerContext):
         reply_to_message_id=query_message_id
     )
     proc: subprocess.Process = await create_subprocess_shell(
-        f"git pull; git checkout HEAD",
+        f"git pull main; git checkout main",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
     )
@@ -433,7 +433,7 @@ async def update_further(context: UpdateHandlerContext):
         reply_to_message_id=query_message_id
     )
     proc: subprocess.Process = await create_subprocess_shell(
-        f"git pull; git checkout HEAD~{downgrade_amount}",
+        f"git pull main; git checkout main~{downgrade_amount}",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
     )
