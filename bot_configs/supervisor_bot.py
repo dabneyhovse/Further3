@@ -351,12 +351,13 @@ async def get_version():
 
 
 @bot_config.add_command_handler(
-    ["update", "update_further"],
+    ["update", "update_further", "upgrade"],
     filters=~filters.UpdateType.EDITED_MESSAGE,
     permissions=UserSelector.And(
         UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR),
         UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
     ),
+    has_args=False,
     blocking=True
 )
 async def update_further(context: UpdateHandlerContext):
@@ -373,7 +374,66 @@ async def update_further(context: UpdateHandlerContext):
         reply_to_message_id=query_message_id
     )
     proc: subprocess.Process = await create_subprocess_shell(
-        f"git pull",
+        f"git pull; git checkout HEAD",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    stdout_result, stderr_result = (bytes_str.decode() for bytes_str in await proc.communicate())
+    if stdout_result:
+        print(f"Update stdout:\n{stdout_result}\n", file=stderr)
+    if stderr_result:
+        print(f"Update stderr:\n{stderr_result}\n", file=stderr)
+    version: str = await get_version()
+    await update_message.edit_text(
+        f"Already up to date: {version}"
+        if "Already up to date." in stdout_result else
+        f"Updated to: {version}\n"
+        f"Send /stop_further and then /stop_process to restart and apply updates."
+    )
+    await query_message.set_reaction("👍")
+
+
+@bot_config.add_command_handler(
+    ["revert", "downgrade"],
+    filters=~filters.UpdateType.EDITED_MESSAGE,
+    permissions=UserSelector.And(
+        UserSelector.MembershipStatusIsIn(MembershipStatusFlag.OWNER | MembershipStatusFlag.ADMINISTRATOR),
+        UserSelector.ChatIDIsIn([Settings.registered_primary_chat_id])
+    ),
+    has_args=1,
+    blocking=True
+)
+async def update_further(context: UpdateHandlerContext):
+    """Attempt to downgrade further to n versions from the most recent available
+    Pulls from the git repository. Restart required afterwords.
+    """
+
+    query_message: Message = context.message
+    query_message_id = query_message.message_id
+
+    try:
+        downgrade_amount: int = int(context.args[0])
+    except ValueError:
+        await context.send_message(
+            "Arg must be a non-negative integer...",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id
+        )
+        return
+    if downgrade_amount < 0:
+        await context.send_message(
+            "Arg must be a non-negative integer...",
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=query_message_id
+        )
+
+    update_message: Message = await context.send_message(
+        "Downgrading...",
+        parse_mode=ParseMode.HTML,
+        reply_to_message_id=query_message_id
+    )
+    proc: subprocess.Process = await create_subprocess_shell(
+        f"git pull; git checkout HEAD~{downgrade_amount}",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
     )
@@ -462,7 +522,6 @@ async def intercept_further_execution(context: UpdateHandlerContext):
             parse_mode=ParseMode.HTML,
             reply_to_message_id=query_message_id
         )
-
 
 # class Log:
 #     def __init__(self, log_message: Message):
