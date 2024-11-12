@@ -1,8 +1,9 @@
 import sys
 from collections import deque
-from collections.abc import Callable, Iterable, Generator
+from collections.abc import Callable, Iterable, Generator, Collection, Sequence
 from enum import Enum
 from itertools import islice, chain, repeat
+from numbers import Number
 from typing import Optional, Any
 
 from attr_dict import AttrDictView
@@ -167,3 +168,11 @@ def trim_docstring(docstring) -> str:
         trimmed.pop(0)
     # Return a single string:
     return "\n".join(trimmed).rstrip()
+
+
+def interpolate_index(seq: Sequence[float], x: float) -> float:
+    i: int = int(x)
+    if x == i:
+        return seq[i]
+    else:
+        return seq[i] * (i - x + 1) + seq[i + 1] * (x - i)
