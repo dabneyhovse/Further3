@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from abc import ABCMeta
 from collections.abc import Callable as CollectionsABCCallable
 from collections.abc import _CallableGenericAlias as CollectionsABCCallableGenericAlias  # noqa
 from types import GenericAlias as TypesGenericAlias
@@ -10,7 +11,7 @@ type _CompoundConstrType = TypesGenericAlias | CollectionsABCCallableGenericAlia
 type ConstrType = GADT | _CompoundConstrType
 
 
-def _gadt_init(self, *_args, **_kwargs):
+def _gadt_init(_self, *_args, **_kwargs):
     raise TypeError("Can't instantiate a GADT using __init__")
 
 
@@ -34,7 +35,7 @@ def _gadt_reduce(self):
 type Constructor = GADT | CompoundConstructor
 
 
-class GADT(type):
+class GADT(ABCMeta):
     @staticmethod
     def update_namespace(namespace):
         updated_namespace = {

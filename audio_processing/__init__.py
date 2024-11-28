@@ -1,11 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-import ffmpeg
-
-import audio_processing.ffmpeg
-import audio_processing.syncopation
-
 
 @dataclass
 class SyncopationSettings:
@@ -73,6 +68,9 @@ class VLCModificationSettings:
 
 async def process_audio(source_path: Path, dest_path: Path,
                         settings: AudioProcessingSettings) -> VLCModificationSettings:
+    import audio_processing.ffmpeg
+    import audio_processing.syncopation
+
     vlc_settings = VLCModificationSettings()
     if settings.requires_syncopation_processing:
         await audio_processing.syncopation.process_audio(source_path, source_path, settings, vlc_settings)

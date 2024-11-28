@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 from asyncio import Future
-from collections.abc import Callable, Coroutine
 from datetime import timedelta, datetime
 from math import log
-from typing import cast, Tuple
+from typing import cast
 
-import validators
-from telegram import User, Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ChatMember, ChatFullInfo, \
-    ChatPermissions, Audio, LinkPreviewOptions
+from telegram import User, Message, CallbackQuery, ChatPermissions, Audio
 from telegram.constants import ParseMode
-from telegram.error import BadRequest
 from telegram.ext import filters
 
 import debugging
@@ -22,8 +18,9 @@ from audio_sources.telegram_file_audio_source import TelegramAudioSource
 from audio_sources.yt_dlp_audio_source import YtDLPAudioSource
 from bot_config import BotConfig
 from duration import Duration
-from flood_control_protection import protect_from_telegram_flood_control, protect_from_telegram_timeout
 from handler_context import UpdateHandlerContext, ApplicationHandlerContext
+from message_edit_status_callback import format_add_video_status
+from message_edit_status_callback.standard import StandardMessageEditStatusCallback
 from settings import Settings
 from tree_message import TreeMessage
 from user_selector import UserSelector, ChatTypeFlag, MembershipStatusFlag
@@ -45,23 +42,6 @@ async def post_init(context: ApplicationHandlerContext):
 
     debugging.listen()
     await bot_config.start_connection_listener()
-
-
-def format_add_video_status(audio_source: AudioSource, user: User | None,
-                            postprocessing: AudioProcessingSettings | None,
-                            status: str | None) -> TreeMessage:
-    return TreeMessage.Sequence([
-        TreeMessage.Named("Queued song", TreeMessage.InlineCode(audio_source.title)),
-        TreeMessage.Named(
-            audio_source.author_and_author_type[0].title(),
-            TreeMessage.InlineCode(audio_source.author_and_author_type[1])
-        ),
-        TreeMessage.Named("Queued by", TreeMessage.Text(user.name)) if user is not None else TreeMessage.Skip,
-        TreeMessage.Named("Duration", TreeMessage.Text(str(audio_source.duration))),
-        TreeMessage.Named("Post-processing", TreeMessage.Text(str(postprocessing)))
-        if postprocessing else TreeMessage.Skip,
-        TreeMessage.Named("Status", TreeMessage.Text(status)) if status is not None else TreeMessage.Skip
-    ])
 
 
 # def format_add_playlist_status(playlist: Playlist, user: User, postprocessing: AudioProcessingSettings,
@@ -214,28 +194,6 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int) -> \
                             reply_to_message_id=query_message_id)
                         return
                     postprocessing.tempo_scale = 1 / inv_scale
-                # case ["increase percussion" | "percussion" | "decrease melody" | "percussion balance", balance_str]:
-                #     balance: float | None = await parse_float(balance_str, context, query_message_id)
-                #     if balance is None:
-                #         return
-                #     if not -1 <= balance <= 1:
-                #         await context.send_message(
-                #             f"Percussive / harmonic balance should be in the range [-1, 1]",
-                #             parse_mode=ParseMode.HTML,
-                #             reply_to_message_id=query_message_id)
-                #         return
-                #     postprocessing.percussive_harmonic_balance = balance
-                # case ["increase melody" | "melody" | "decrease percussion" | "melody balance", balance_str]:
-                #     balance: float | None = await parse_float(balance_str, context, query_message_id)
-                #     if balance is None:
-                #         return
-                #     if not -1 <= balance <= 1:
-                #         await context.send_message(
-                #             f"Percussive / harmonic balance should be in the range [-1, 1]",
-                #             parse_mode=ParseMode.HTML,
-                #             reply_to_message_id=query_message_id)
-                #         return
-                #     postprocessing.percussive_harmonic_balance = -balance
                 case ["nightcore" | "night-core" | "sped up" | "sped-up"]:
                     postprocessing.pitch_shift = 12 * log(1.35) / log(2)
                     postprocessing.tempo_scale = 1.35
@@ -277,50 +235,19 @@ async def parse_query(context: UpdateHandlerContext, query_message_id: int) -> \
     return audio_source, postprocessing
 
 
-def generate_message_edit_status_callback(message: Message, audio_source: AudioSource, user: User,
-                                          part_of_playlist: bool, postprocessing: AudioProcessingSettings) -> \
-        Callable[[str, int | None, str | None], Coroutine[None, None, None]]:
-    @protect_from_telegram_timeout
-    @protect_from_telegram_flood_control(bot_config.connection_listener)
-    async def message_edit_status(status: str, skip_index: int | None, url: str | None = None) -> None:
-        keyboard = [
-            [InlineKeyboardButton("Skip", callback_data=("skip_button", skip_index))]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        try:
-            await message.edit_text(
-                str(format_add_video_status(audio_source, user if not part_of_playlist else None, postprocessing,
-                                            status)),
-                parse_mode=ParseMode.HTML,
-                reply_markup=(reply_markup if skip_index is not None else None),
-                link_preview_options=LinkPreviewOptions(
-                    is_disabled=(url is None),
-                    url=url,
-                    prefer_small_media=True,
-                    show_above_text=False
-                )
-            )
-        except BadRequest as e:
-            if not e.message.startswith("Message is not modified"):
-                raise
-
-    return message_edit_status
-
-
 async def queue_video(context: UpdateHandlerContext, audio_source: AudioSource, user: User, query_message_id: int,
-                      postprocessing: AudioProcessingSettings, part_of_playlist: bool = False):
-    message: Message = await context.send_message(
-        str(format_add_video_status(audio_source, user if not part_of_playlist else None, postprocessing,
-                                    "Downloading")),
+                      postprocessing: AudioProcessingSettings):
+    # TODO: Make audio_source a future so that the bot replies immediately/
+    message: Message = await context.send_message(str(
+        format_add_video_status(audio_source, user, postprocessing, "Searching")),
         parse_mode=ParseMode.HTML,
         reply_to_message_id=query_message_id
     )
     download_resource = bot_config.resource_handler.claim()
 
-    message_edit_status_callback = generate_message_edit_status_callback(message, audio_source, user, part_of_playlist,
-                                                                         postprocessing)
+    # TODO: Option for if it's part of a playlist
+    message_edit_status_callback = StandardMessageEditStatusCallback(message, audio_source, user, postprocessing)
 
-    await message_edit_status_callback("Adding to queue", None)
     queue_element: AudioQueueElement = AudioQueueElement(
         element_id=context.run_data.queue.get_id(),
         resource=download_resource,

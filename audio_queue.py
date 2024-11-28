@@ -1,9 +1,11 @@
-from asyncio import sleep, get_event_loop, Future, CancelledError, Task, TaskGroup
+import traceback
+from asyncio import sleep, get_event_loop, Future, CancelledError, Task, TaskGroup, to_thread
 from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
 from enum import Enum
 from os import PathLike
 from pathlib import Path
+from sys import stderr
 
 from vlc import Instance, MediaPlayer, Media
 from vlc import State as VLCState
@@ -12,6 +14,7 @@ from async_queue import AsyncQueue
 from audio_processing import AudioProcessingSettings, process_audio, VLCModificationSettings
 from audio_sources import AudioSource
 from duration import Duration
+from message_edit_status_callback import MessageEditStatusCallback
 from quiet_hours import is_quiet_hours
 from resource_handler import ResourceHandler
 from settings import Settings
@@ -23,7 +26,7 @@ class AudioQueueElement:
     resource: ResourceHandler.Resource
     audio_source: AudioSource
     processing: AudioProcessingSettings
-    message_setter: Callable[[str, int, str | None], Coroutine[None, None, None]]
+    message_setter: MessageEditStatusCallback
     path: Future[PathLike | None]
     download_task: Future[Task]
     active: bool = False
@@ -35,7 +38,11 @@ class AudioQueueElement:
         return not self.resource.is_open
 
     async def set_message(self, message: str, skippable: bool = True) -> None:
-        await self.message_setter(message, self.element_id if skippable else None, self.audio_source.url)
+        try:
+            await self.message_setter(message, self.element_id if skippable else None, self.audio_source.url)
+        except Exception as e:
+            print("Caught exception in audio_queue/set_message")
+            traceback.print_exception(type(e), e, e.__traceback__, file=stderr)
 
     async def download(self):
         try:

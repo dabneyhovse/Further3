@@ -62,5 +62,5 @@ class TreeMessage(metaclass=GADT):
             case TreeMessage.Skip, _:
                 return other
 
-    def __matmul__(self, condition: bool) -> TreeMessage:
-        return self if condition else TreeMessage.Skip
+    def __matmul__(self, condition: object) -> TreeMessage:
+        return self if bool(condition) else TreeMessage.Skip

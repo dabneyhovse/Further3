@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import html
 import os
 import threading
 import time
@@ -12,7 +11,7 @@ from multiprocessing import Process, Pipe
 from multiprocessing.connection import Connection  # noqa
 from sys import stderr
 
-from telegram import Message, Bot, ChatFullInfo, LinkPreviewOptions
+from telegram import Message, Bot, ChatFullInfo
 from telegram.constants import ParseMode
 from telegram.ext import filters
 
