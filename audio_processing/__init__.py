@@ -28,6 +28,10 @@ class AudioProcessingSettings:
     def requires_syncopation_processing(self) -> bool:
         return self.syncopation is not None
 
+    @property
+    def requires_audio_processing(self) -> bool:
+        return self.requires_ffmpeg_processing or self.requires_syncopation_processing
+
     def __bool__(self) -> bool:
         return (self.pitch_shift != 0 or self.tempo_scale != 1 or
                 self.echo or self.metal or self.reverb or

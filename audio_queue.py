@@ -49,7 +49,7 @@ class AudioQueueElement:
             await self.set_message("Downloading")
             path: Path = await self.audio_source.download(self.resource)
             # path: Path = await to_thread(self.audio_source.download, self.resource)
-            if self.processing:
+            if self.processing.requires_audio_processing:
                 await self.set_message("Processing")  # Can be removed if Telegram throttling is too bad
                 processed_path: Path = self.resource.path / "processed.mp3"
                 self.vlc_settings = await process_audio(path, processed_path, self.processing)

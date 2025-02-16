@@ -361,7 +361,7 @@ async def get_version():
 )
 async def update_further(context: UpdateHandlerContext):
     """Attempt to update further
-    Pulls from the git repository. Restart required afterwords.
+    Pulls from the git repository. Restart required afterward.
     """
 
     query_message: Message = context.message
@@ -404,7 +404,7 @@ async def update_further(context: UpdateHandlerContext):
 )
 async def update_further(context: UpdateHandlerContext):
     """Attempt to downgrade further to n versions from the most recent available
-    Pulls from the git repository. Restart required afterwords.
+    Pulls from the git repository. Restart required afterward.
     """
 
     query_message: Message = context.message
