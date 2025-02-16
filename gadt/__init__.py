@@ -75,6 +75,8 @@ class GADT(ABCMeta):
         if hasattr(cls, "__annotation_locals__"):
             cls_annotation_locals.update(cls.__annotation_locals__)
 
+        if type_params := getattr(cls, "__type_params__", ()):
+            cls_annotation_locals.update({param.__name__: param for param in type_params})
         cls_annotations = inspect.get_annotations(cls, eval_str=True, locals=cls_annotation_locals)
         cls.__constructors__ = {}
         for constr_name, constr_type in cls_annotations.items():
