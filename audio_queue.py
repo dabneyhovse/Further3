@@ -257,8 +257,9 @@ class AudioQueue(Iterable[AudioQueueElement]):
                 
                 # And then do the rampup back to full volume
                 ticks_needed = Settings.rampup_seconds // Settings.async_sleep_refresh_rate + 1
+                ramp = (1 / target) ** (1 / ticks_needed)
                 while await self.sfx_queue.currently_empty() and self.sfx_playermult <= 1:
-                    self.sfx_playermult /= ramp
+                    self.sfx_playermult *= ramp
                     self.player.audio_set_volume(
                         self.sfx_player.audio_get_volume() * self.sfx_playermult
                     )
