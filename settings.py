@@ -33,7 +33,13 @@ class Settings:
     max_telegram_flood_control_retries: int = 4
 
     # Hampter
-    hampter_path: str | None = "audio_files/hampter.wav"
+    sfx_path: str | None = "audio_files/"
+
+    # SFX Modifiers
+    cooldown_seconds: float = 2.0
+    sfx_volmult: float = 0.1
+    rampup_delay_seconds: float = 3.0
+    rampup_seconds: float = 1.0
 
     # Amogus
     amogus_ban_id: int
