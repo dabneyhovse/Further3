@@ -33,7 +33,7 @@ class Settings:
     max_telegram_flood_control_retries: int = 4
 
     # Hampter
-    hampter_path: str | None = "audio_files/hampter.wav"
+    sfx_path: str | None = "audio_files/"
 
     # Amogus
     amogus_ban_id: int
