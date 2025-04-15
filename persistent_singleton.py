@@ -22,10 +22,10 @@ class PersistenceSource(Enum):
 
     def dump(self, path: os.PathLike, obj: Any):
         with open(path, "w" + self.format_modifier) as f:
-            self.source.dump(obj, f)
+            self.source.dump(obj, f, indent=2)
 
     def dumps(self, obj: Any) -> str | bytes:
-        return self.source.dumps(obj)
+        return self.source.dumps(obj, indent=2)
 
     def load(self, path: os.PathLike):
         with open(path, "r" + self.format_modifier) as f:
