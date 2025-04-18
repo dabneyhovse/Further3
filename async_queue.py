@@ -136,6 +136,10 @@ class AsyncQueue[T](Iterable[T]):
             if not self._queue:
                 self._non_empty_event.clear()
             return out
+    
+    async def currently_empty(self) -> bool:
+        async with self.read_lock:
+            return not self._queue
 
     def __bool__(self) -> bool:
         return bool(self._queue) and bool(self._queue[0])

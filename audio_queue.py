@@ -18,7 +18,10 @@ from message_edit_status_callback import MessageEditStatusCallback
 from quiet_hours import is_quiet_hours
 from resource_handler import ResourceHandler
 from settings import Settings
+from audio_sources.local_audio_source import LocalAudioSource
 
+import os
+import math
 
 @dataclass
 class AudioQueueElement:
@@ -111,92 +114,50 @@ class AudioQueue(Iterable[AudioQueueElement]):
                     return "VLC Error"
 
     queue: AsyncQueue[AudioQueueElement]
+    sfx_queue: AsyncQueue[AudioQueueElement]
     instance: Instance
     player: MediaPlayer
+    sfx_player: MediaPlayer
     current: AudioQueueElement | None = None
     _next_id: int = 0
 
+    sfx_playermult: float = 1.0
+
     def __init__(self):
         self.queue = AsyncQueue()
+        self.sfx_queue = AsyncQueue()
         self.instance = Instance()
         self.player = self.instance.media_player_new()
+        self.sfx_player = self.instance.media_player_new()
         get_event_loop().create_task(self.play_queue())
+        get_event_loop().create_task(self.play_sfx_queue())
 
     async def add(self, element: AudioQueueElement):
         await self.queue.append(element)
         download_task = get_event_loop().create_task(element.download())
         element.download_task.set_result(download_task)
 
-    # TODO return this when there is a FileAudioSource
-    # async def play_without_queue(self, element: AudioQueueElement) -> None:
-    #     if element.skipped:
-    #         return
-    #     path: PathLike = await element.path
-    #     if path is None:
-    #         assert element.skipped
-    #         return
-    #
-    #     if is_quiet_hours():
-    #         return
-    #
-    #     instance: Instance = Instance()
-    #     player: MediaPlayer = instance.media_player_new()
-    #
-    #     player.audio_set_volume(self.player.audio_get_volume())
-    #
-    #     if Settings.sound_starter_path is not None:
-    #         starter_media: Media = instance.media_new_path(Settings.sound_starter_path)
-    #         player.set_media(starter_media)
-    #
-    #         player.set_rate(1)
-    #
-    #         player.play()
-    #         while player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not element.skipped and \
-    #                 not is_quiet_hours():
-    #             await sleep(Settings.async_sleep_refresh_rate)
-    #
-    #         if player.get_state() not in (VLCState.Ended, VLCState.Stopped):
-    #             player.stop()
-    #
-    #     media: Media = instance.media_new_path(path)
-    #     player.set_media(media)
-    #
-    #     if element.processing.tempo_scale != 1:
-    #         player.set_rate(element.processing.tempo_scale)
-    #
-    #     player.play()
-    #     element.active = True
-    #
-    #     while player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not element.skipped and \
-    #             not is_quiet_hours():
-    #         await sleep(Settings.async_sleep_refresh_rate)
-    #
-    #     if player.get_state() not in (VLCState.Ended, VLCState.Stopped):
-    #         player.stop()
-    #
-    #     await element.finish()
+    async def add_sfx(self, sfx: str):
+        path = os.path.join(Settings.sfx_path, sfx)
+        if not os.path.exists(path):
+            print(f"Sound effect {sfx} not found in {Settings.sfx_path}", file=stderr)
+            return None
+        media: Media = self.instance.media_new_path(path)
+        await self.sfx_queue.append(AudioQueueElement(
+            element_id=self.get_id(),
+            resource=ResourceHandler.Resource(path),
+            audio_source=LocalAudioSource(Path(path)),
+            processing=AudioProcessingSettings(),
+            message_setter=MessageEditStatusCallback(lambda x, y, z: None),
+            path=Future(),
+            download_task=Future(),
+        ))
 
     async def hampter(self) -> None:
         if is_quiet_hours():
             return
-
-        instance: Instance = Instance()
-        player: MediaPlayer = instance.media_player_new()
-
-        player.audio_set_volume(self.player.audio_get_volume())
-
-        player.set_rate(1)
-
-        media: Media = instance.media_new_path(Settings.hampter_path)
-        player.set_media(media)
-
-        player.play()
-
-        while player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not is_quiet_hours():
-            await sleep(Settings.async_sleep_refresh_rate)
-
-        if player.get_state() not in (VLCState.Ended, VLCState.Stopped):
-            player.stop()
+        
+        await self.add_sfx("hampter.wav")
 
     async def play_queue(self) -> None:
         async with self.queue.async_iter() as async_iterator:
@@ -242,6 +203,73 @@ class AudioQueue(Iterable[AudioQueueElement]):
                 # TODO: release() media if needed
                 await element.finish()
                 self.current = None
+    
+    async def play_sfx_queue(self) -> None:
+        async with self.sfx_queue.async_iter() as async_iterator:
+            async for element in async_iterator:
+                path: Path | None = await element.path
+                if path is None:
+                    assert element.skipped
+                    continue
+
+                if is_quiet_hours():
+                    continue
+
+                epsilon = 1e-3
+                target = Settings.sfx_volmult
+                ticks_needed = Settings.rampup_seconds // Settings.async_sleep_refresh_rate + 1
+                ramp = target ** (1 / ticks_needed)
+
+                while abs(self.sfx_playermult - target) > epsilon:
+                    self.sfx_playermult *= ramp
+                    self.player.audio_set_volume(
+                        self.sfx_player.audio_get_volume() * Settings.sfx_volmult
+                    )
+                    await sleep(Settings.async_sleep_refresh_rate)
+
+                self.sfx_playermult = Settings.sfx_volmult
+                self.player.audio_set_volume(
+                    self.sfx_player.audio_get_volume() * Settings.sfx_playermult
+                )
+
+                media: Media = self.instance.media_new_path(path)
+                self.sfx_player.set_media(media)
+                self.sfx_player.set_rate(element.vlc_settings.tempo_scale)
+                await element.set_message("Playing")
+                self.sfx_player.play()
+                element.active = True
+
+                while self.sfx_player.get_state() not in (VLCState.Ended, VLCState.Stopped) and not is_quiet_hours():
+                    await sleep(Settings.async_sleep_refresh_rate)
+
+                if is_quiet_hours():
+                    continue
+
+                if self.sfx_player.get_state() not in (VLCState.Ended, VLCState.Stopped):
+                    self.sfx_player.stop()
+
+                await element.finish()
+
+                # If queue is empty, start delay
+                ticks_remaining = Settings.rampup_delay_seconds // Settings.async_sleep_refresh_rate + 1
+                while ticks_remaining > 0 and await self.sfx_queue.currently_empty():
+                    await sleep(Settings.async_sleep_refresh_rate)
+                
+                # And then do the rampup back to full volume
+                ticks_needed = Settings.rampup_seconds // Settings.async_sleep_refresh_rate + 1
+                ramp = (1 / target) ** (1 / ticks_needed)
+                while await self.sfx_queue.currently_empty() and self.sfx_playermult <= 1:
+                    self.sfx_playermult *= ramp
+                    self.player.audio_set_volume(
+                        self.sfx_player.audio_get_volume() * self.sfx_playermult
+                    )
+                    await sleep(Settings.async_sleep_refresh_rate)
+                
+                if await self.sfx_queue.currently_empty():
+                    self.sfx_playermult = 1.0
+                    self.player.audio_set_volume(
+                        self.sfx_player.audio_get_volume() * self.sfx_playermult
+                    )
 
     async def skip(self, username: str) -> bool:
         if self.current is None:
@@ -275,17 +303,21 @@ class AudioQueue(Iterable[AudioQueueElement]):
     async def set_digital_volume(self, volume: float) -> bool:
         absolute_volume: float = volume * Settings.hundred_percent_volume_value
         if 0 <= absolute_volume <= Settings.max_absolute_volume * 100:
-            return self.player.audio_set_volume(round(absolute_volume)) + 1
+            result = self.sfx_player.audio_set_volume(round(absolute_volume)) + 1
+            self.player.audio_set_volume(round(absolute_volume) * self.sfx_playermult)
+            return result
         else:
             return False
 
     async def set_clamped_digital_volume(self, volume: float) -> bool:
         absolute_volume: float = volume * Settings.hundred_percent_volume_value
         absolute_volume = min(max(absolute_volume, 0), Settings.max_absolute_volume * 100)
-        return self.player.audio_set_volume(round(absolute_volume)) + 1
+        result = self.sfx_player.audio_set_volume(round(absolute_volume)) + 1
+        self.player.audio_set_volume(round(absolute_volume) * self.sfx_playermult)
+        return result
 
     async def get_digital_volume(self) -> float:
-        scaled_volume = self.player.audio_get_volume()
+        scaled_volume = self.sfx_player.audio_get_volume()
         return scaled_volume / Settings.hundred_percent_volume_value
 
     @property
@@ -308,11 +340,15 @@ class AudioQueue(Iterable[AudioQueueElement]):
             case (player_state, queue_nonempty, current_set):
                 print(f"Unknown audio queue state error:\n"
                       f"\tself.player.get_state(): {player_state}\n"
+                      f"\tself.sfx_player.get_state(): {self.sfx_player.get_state()}\n"
                       f"\tbool(self.queue): {queue_nonempty}\n"
-                      f"\tself.current is not None: {current_set}"
-                      f"\tself.queue: {self.queue}"
-                      f"\tself.current: {self.current}"
-                      f"\tself.current.skipped: {self.current.skipped}")
+                      f"\tbool(self.sfx_queue): {bool(self.sfx_queue)}\n"
+                      f"\tself.current is not None: {current_set}\n"
+                      f"\tself.queue: {self.queue}\n"
+                      f"\tself.sfx_queue: {self.sfx_queue}\n"
+                      f"\tself.current: {self.current}\n"
+                      f"\tself.current.skipped: {self.current.skipped}\n"
+                      f"\tself.sfx_playermult: {self.sfx_playermult}")
                 return AudioQueue.State.UNKNOWN_ERROR
 
     def get_id(self) -> int:
