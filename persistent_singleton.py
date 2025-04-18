@@ -21,6 +21,7 @@ class PersistenceSource(Enum):
                 self.format_modifier = "b"
 
     def dump(self, path: os.PathLike, obj: Any):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w" + self.format_modifier) as f:
             self.source.dump(obj, f)
 
