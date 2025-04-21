@@ -4,7 +4,39 @@ import os
 import pickle
 from collections.abc import Buffer
 from enum import Enum
-from typing import Any
+from typing import get_type_hints, get_origin, get_args, Any, Union
+from types import UnionType
+from inspect import getmodule
+
+def deep_type_check(value: Any, expected_type: Any) -> bool:
+    origin = get_origin(expected_type)
+    args = get_args(expected_type)
+
+    if expected_type is Any:
+        return True
+    if expected_type is type(None):
+        return value is None
+    if origin is None:
+        return isinstance(value, expected_type)
+    if origin is UnionType:
+        return any(deep_type_check(value, arg) for arg in args)
+    if origin in {list, tuple, set}:
+        if not isinstance(value, origin):
+            return False
+        if not args:
+            return True  # No type info for elements
+        return all(deep_type_check(v, args[0]) for v in value)
+    if origin is dict:
+        if not isinstance(value, dict):
+            return False
+        if not args:
+            return True  # No type info for keys/values
+        key_type, val_type = args
+        return all(
+            deep_type_check(k, key_type) and deep_type_check(v, val_type)
+            for k, v in value.items()
+        )
+    return False
 
 
 class PersistenceSource(Enum):
@@ -43,17 +75,19 @@ def _persistent_new_and_init(_self, *_args, **_kwargs):
 def persistent_singleton(persistence_source: PersistenceSource, persistence_file: os.PathLike,
                          hot_reload: bool = False):
     def wrapper(cls):
-        namespace = dict(cls.__dict__)
-        persistence_singleton_instance_namespace = dict(PersistentSingleton.__dict__)
-        del persistence_singleton_instance_namespace["__annotations__"]
-        namespace.update(persistence_singleton_instance_namespace)
+        original_annotations = get_type_hints(cls, globalns=vars(getmodule(cls)))
+        original_namespace = dict(cls.__dict__)
+        original_namespace["__annotations__"] = original_annotations
+
+        # Merge in the persistent singleton base logic
+        persistent_namespace = dict(PersistentSingleton.__dict__)
+        persistent_namespace.pop("__annotations__", None)
+        original_namespace.update(persistent_namespace)
 
         if len(cls.__bases__) != 1 or cls.__bases__[0] != object:
             raise NotImplementedError("Can't create a persistent singleton subtype yet")
 
-        bases = (PersistentSingletonInstance,)
-
-        singleton = PersistentSingleton(cls.__name__, bases=bases, namespace=namespace)
+        singleton = PersistentSingleton(cls.__name__, (PersistentSingletonInstance,), original_namespace)
         singleton.__persistence_source__ = persistence_source
         singleton.__persistence_file_path__ = persistence_file
         singleton.__hot_reload__ = hot_reload
@@ -76,13 +110,21 @@ class PersistentSingleton(type):
     def __init__(cls, name, bases, namespace):
         super().__init__(name, bases, namespace)
 
-        cls_annotations = inspect.get_annotations(cls)
+        cls_annotations = get_type_hints(cls)
         cls.__singleton_fields__ = list()
         cls.__persistence_dict__ = dict()
         for field_name, _field_type in cls_annotations.items():
             cls.__singleton_fields__.append(field_name)
             if hasattr(cls, field_name):
-                cls.__persistence_dict__[field_name] = getattr(cls, field_name)
+                value = getattr(cls, field_name)
+                expected_type = get_type_hints(cls).get(field_name)
+                if expected_type is not None and not deep_type_check(value, expected_type):
+                    try:
+                        value = expected_type(value)
+                    except:
+                        raise TypeError(f"Expected type '{expected_type}' for attribute '{field_name}', but got '{type(value)}'")
+                cls.__persistence_dict__[field_name] = value
+                delattr(cls, field_name)
         if hasattr(cls, "__init__"):
             cls.__dataclass_init__ = cls.__init__
         cls.__new__ = _persistent_new_and_init
@@ -100,11 +142,13 @@ class PersistentSingleton(type):
 
     def __setattr__(cls, attr, value):
         if hasattr(cls, "__singleton_fields__") and attr in cls.__singleton_fields__:
+            expected_type = get_type_hints(cls).get(attr)
+            if expected_type is not None and not deep_type_check(value, expected_type):
+                raise TypeError(f"Expected type '{expected_type}' for attribute '{attr}', but got '{type(value)}'")
             cls.__persistence_dict__[attr] = value
             cls.push()
         else:
             super().__setattr__(attr, value)
-
 
 class PersistentSingletonInstance(metaclass=PersistentSingleton):
     @classmethod
