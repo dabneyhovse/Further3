@@ -484,9 +484,8 @@ async def intercept_further_execution(context: UpdateHandlerContext):
     has_args=False,
     blocking=True
 )
-async def intercept_further_execution(context: UpdateHandlerContext):
-    """Attempt to intercept @DabneyFurtherBot bot execution and create an interactive console on the server
-    Please don't run this command if you don't have access to the running process on the server.
+async def get_further_status(context: UpdateHandlerContext):
+    """Gets an overview of the @DabneyFurtherBot status
     """
 
     query_message: Message = context.message
