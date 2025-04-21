@@ -23,7 +23,7 @@ def _gadt_repr(self):
 
 
 def _gadt_eq(self, other):
-    return (other.__origin__ == self.__origin__ and
+    return (isinstance(other, self.__origin__) and
             self.__constr__ is other.__constr__ and
             self.__construction_data__ == other.__construction_data__)
 
