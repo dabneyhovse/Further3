@@ -66,8 +66,11 @@ class HelpMessage:
             ).describe(user_name_lookup, chat_name_lookup)
         )
 
-        docstring_head_message: TreeMessage = TreeMessage.Text(f"<b>{self.docstring.splitlines()[0]}</b>")
-        docstring_tail_message: TreeMessage = TreeMessage.Text("\n".join(self.docstring.splitlines()[1:]))
+        docstring_split = self.docstring.splitlines()
+        if len(docstring_split) == 0:
+            docstring_split = [ "FIXME: No docstring" ] # Fallback message to avoid an OOB
+        docstring_head_message: TreeMessage = TreeMessage.Text(f"<b>{docstring_split[0]}</b>")
+        docstring_tail_message: TreeMessage = TreeMessage.Text("\n".join(docstring_split[1:]))
 
         return name_message & TreeMessage.Sequence([
             TreeMessage.Named("Command", name_message),
@@ -75,5 +78,5 @@ class HelpMessage:
             TreeMessage.Named("Can be run", permission_message),
             TreeMessage.Named("Filter", user_selector_filter_message) @ (self.user_selector_filter is not None),
             docstring_head_message,
-            docstring_tail_message @ ("\n" in self.docstring)
+            docstring_tail_message @ (len(docstring_split) > 1)
         ])
