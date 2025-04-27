@@ -4,6 +4,8 @@ from settings import Settings
 
 
 def is_quiet_hours() -> bool:
+    if Settings.debug:
+        return False
     now: datetime = datetime.now()
     weekend: bool = (now + timedelta(hours=9)).weekday() >= 5
     start_hour: float = Settings.weekend_quiet_hours_start_time if weekend else Settings.normal_quiet_hours_start_time
