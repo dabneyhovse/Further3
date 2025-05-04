@@ -70,7 +70,7 @@ def format_get_queue(queue: AudioQueue) -> TreeMessage:
                         (
                                 queue.current.duration -
                                 Duration.from_timedelta(
-                                    timedelta(milliseconds=queue.main_player.get_time())
+                                    timedelta(milliseconds=queue.player.get_time())
                                 ) / queue.current.processing.tempo_scale
                         )
                         if queue.state in [AudioQueue.State.PLAYING, AudioQueue.State.PAUSED] else
