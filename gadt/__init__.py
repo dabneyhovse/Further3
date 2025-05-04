@@ -21,13 +21,30 @@ def _gadt_repr(self):
         if self.__construction_data__ is not None else ""
     )
 
+HACKY_DEBUG_FLAG = False
 
 def _gadt_eq(self, other):
-    return (isinstance(other, self.__origin__) and
-            self.__constr__ is other.__constr__ and
-            self.__construction_data__ == other.__construction_data__)
-
-
+    if HACKY_DEBUG_FLAG:
+        print(f"Comparing {self} with {other}")
+        print(f"Type: {type(self)} vs {type(other)}")
+        print(f"Origin: {self.__origin__} vs {getattr(other, '__origin__', None)}")
+        print(f"issubclass(type(other), self.__origin__): {issubclass(type(other), self.__origin__)}")
+        print(f"issubclass(type(self), other.__origin__): {issubclass(type(self), other.__origin__)}")
+    if not issubclass(type(other), self.__origin__):
+        if HACKY_DEBUG_FLAG:
+            print(f"Not the same type: {self.__origin__} vs {type(other)}")
+        return False
+    if self.__construction_data__ is not other.__construction_data__:
+        if HACKY_DEBUG_FLAG:
+            print(f"Construction data mismatch: {self.__construction_data__} vs {other.__construction_data__}")
+        return False
+    if self.__constr__ is not other.__constr__:
+        if HACKY_DEBUG_FLAG:
+            print(f"Constructor mismatch: {self.__constr__} vs {other.__constr__}")
+        return False
+    if HACKY_DEBUG_FLAG:
+        print(f"All checks passed for {self} and {other}")
+    return True
 def _gadt_reduce(self):
     return self.__origin__.__reconstruct__, (self.__constr_name__, self.__construction_data__)
 
