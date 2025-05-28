@@ -62,6 +62,8 @@ class AudioQueueElement:
             assert self.skipped
             self.path.set_result(None)
             raise
+        except Exception as e:
+            self.path.set_exception(e)
 
     async def skip(self, username: str) -> bool:
         if self.skipped or self.freed:
@@ -204,7 +206,16 @@ class AudioQueue(Iterable[AudioQueueElement]):
                 if element.skipped:
                     continue
                 self.current = element
-                path: Path | None = await element.path
+                try:
+                    path: Path | None = await element.path
+                except Exception as e:
+                    self.current.skipped = True
+                    self.current.active = False
+                    self.current.resource.close()
+                    await self.current.set_message(f"An error occured during download", skippable=False)
+                    print("Caught exception during audio download")
+                    traceback.print_exception(type(e), e, e.__traceback__, file=stderr)
+                    continue
                 if path is None:
                     assert element.skipped
                     self.current = None
