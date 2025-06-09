@@ -250,6 +250,9 @@ class AudioQueue(Iterable[AudioQueueElement]):
                     if not element.processing.loop:
                         break
 
+                if element.skipped and self.player.get_state() not in (VLCState.Ended, VLCState.Stopped):
+                    self.player.stop()
+
                 # TODO: release() media if needed
                 await element.finish()
                 self.current = None
